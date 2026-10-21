@@ -11,6 +11,8 @@ const fake = vi.hoisted(() => ({
   callback: null as ((e: string, s: unknown) => void) | null,
   remote: {} as Record<string, { data: unknown; revision: number }>,
   rpc: vi.fn(),
+  read: null as
+    ((owner: string) => Promise<{ data: unknown; error: null }>) | null,
 }));
 vi.mock("../src/lib/supabase", () => ({
   supabase: {
@@ -27,10 +29,13 @@ vi.mock("../src/lib/supabase", () => ({
     from: () => ({
       select: () => ({
         eq: (_key: string, owner: string) => ({
-          maybeSingle: async () => ({
-            data: fake.remote[owner] || null,
-            error: null,
-          }),
+          maybeSingle: () =>
+            fake.read
+              ? fake.read(owner)
+              : Promise.resolve({
+                  data: fake.remote[owner] || null,
+                  error: null,
+                }),
         }),
       }),
     }),
@@ -61,6 +66,7 @@ beforeEach(async () => {
   fake.owner = null;
   fake.callback = null;
   fake.remote = {};
+  fake.read = null;
   fake.rpc.mockReset();
   fake.rpc.mockResolvedValue({ data: 1, error: null });
   window.matchMedia = vi.fn().mockReturnValue({ matches: false });
@@ -178,5 +184,38 @@ describe("authenticated draft synchronization", () => {
     expect(result.current.workspace?.projects[0].name).toBe("SECOND");
     expect(result.current.record?.dirty).toBe(true);
     expect(result.current.record?.revision).toBe(5);
+  });
+  it("discards a delayed cloud response from a previous signed-in account", async () => {
+    fake.owner = "alice";
+    await saveLocal("alice", {
+      data: workspace("ALICE LOCAL"),
+      revision: 1,
+      dirty: true,
+      updatedAt: new Date().toISOString(),
+    });
+    let finish: ((value: { data: unknown; error: null }) => void) | undefined;
+    fake.read = (owner) =>
+      owner === "alice"
+        ? new Promise((resolve) => {
+            finish = resolve;
+          })
+        : Promise.resolve({
+            data: { data: workspace("BOB CLOUD"), revision: 1 },
+            error: null,
+          });
+    const { result } = renderHook(() => useWorkspace());
+    await waitFor(() => expect(finish).toBeDefined());
+    await sign("bob");
+    await waitFor(() =>
+      expect(result.current.workspace?.projects[0].name).toBe("BOB CLOUD"),
+    );
+    await act(async () =>
+      finish?.({
+        data: { data: workspace("ALICE REMOTE"), revision: 2 },
+        error: null,
+      }),
+    );
+    expect(result.current.workspace?.projects[0].name).toBe("BOB CLOUD");
+    expect(result.current.conflict).toBeNull();
   });
 });

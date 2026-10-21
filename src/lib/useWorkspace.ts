@@ -17,7 +17,7 @@ export function useWorkspace() {
     [ready, setReady] = useState(false);
   const scope = useRef(0),
     current = useRef(record),
-    saving = useRef(false),
+    saving = useRef<number | null>(null),
     loadedOwner = useRef<string | undefined>(undefined);
   current.current = record;
   useEffect(() => {
@@ -71,6 +71,7 @@ export function useWorkspace() {
             .select("data,revision")
             .eq("owner_id", owner)
             .maybeSingle();
+          if (!alive || epoch !== scope.current) return;
           if (error) throw error;
           if (data) {
             const cloud = {
@@ -128,12 +129,12 @@ export function useWorkspace() {
       !owner ||
       !supabase ||
       !snapshot?.dirty ||
-      saving.current ||
+      saving.current === scope.current ||
       conflict
     )
       return;
     const epoch = scope.current;
-    saving.current = true;
+    saving.current = epoch;
     setStatus("클라우드 저장 중");
     try {
       const { data, error } = await supabase.rpc("save_workspace", {
@@ -167,6 +168,7 @@ export function useWorkspace() {
           .select("data,revision")
           .eq("owner_id", owner)
           .maybeSingle();
+        if (epoch !== scope.current) return;
         if (data) {
           const parsed = workspaceSchema.safeParse(data.data);
           if (parsed.success)
@@ -174,7 +176,7 @@ export function useWorkspace() {
         }
       }
     } finally {
-      saving.current = false;
+      if (saving.current === epoch) saving.current = null;
     }
   }, [owner, ready, conflict]);
   useEffect(() => {

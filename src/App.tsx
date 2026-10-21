@@ -243,8 +243,8 @@ export default function App() {
           id: uid(),
           source: c.source!,
           target: c.target!,
-          sourceHandle: c.sourceHandle || "bottom-out",
-          targetHandle: c.targetHandle || "top-in",
+          sourceHandle: c.sourceHandle || null,
+          targetHandle: c.targetHandle || null,
           data: {
             kind,
             label:
@@ -267,8 +267,8 @@ export default function App() {
         connect({
           source,
           target: id,
-          sourceHandle: "bottom-out",
-          targetHandle: "top-in",
+          sourceHandle: null,
+          targetHandle: null,
         });
       setSelection({ nodes: [source], edges: [] });
     } else setPanel("right");

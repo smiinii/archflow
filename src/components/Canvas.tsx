@@ -264,10 +264,24 @@ function CanvasInner(p: Props) {
     dragHandle: n.type === "group" ? ".group-title" : undefined,
     zIndex: n.type === "group" ? 0 : 2,
   })) as Node[];
+  const handles = (edge: Link) => {
+    const source = g.nodes.find((n) => n.id === edge.source)!;
+    const target = g.nodes.find((n) => n.id === edge.target)!;
+    const a = absolutePosition(source, g.nodes),
+      b = absolutePosition(target, g.nodes);
+    const horizontal =
+      b.x > a.x + source.width && Math.abs(b.y - a.y) < Math.abs(b.x - a.x);
+    return {
+      sourceHandle:
+        edge.sourceHandle || (horizontal ? "right-out" : "bottom-out"),
+      targetHandle: edge.targetHandle || (horizontal ? "left-in" : "top-in"),
+    };
+  };
   const edges = g.edges
     .filter((e) => !p.flowId || e.data.flowIds.includes(p.flowId))
     .map((e) => ({
       ...e,
+      ...handles(e),
       type: "flow",
       selected: p.selection.edges.includes(e.id),
       markerEnd: {
