@@ -573,7 +573,7 @@ function CanvasInner(p: Props) {
     ...fitOptions,
     ...(p.readingMode && p.readingMode !== "all"
       ? {
-          minZoom: p.readingMode === "overview" ? 0.45 : 0.65,
+          minZoom: 0.15,
           padding: {
             top: "56px",
             right: "20px",
@@ -583,9 +583,7 @@ function CanvasInner(p: Props) {
         }
       : {}),
     ...(p.preview ? { minZoom: 0.15 } : {}),
-    nodes: visibleGraph.nodes
-      .filter((n) => n.type !== "group")
-      .map((n) => ({ id: n.id })),
+    nodes: visibleGraph.nodes.map((n) => ({ id: n.id })),
   };
   const signature = `${p.flowId}:${p.focused}:${p.fitKey}:${p.readingMode}:${p.readingFlows?.join(",")}:${p.expandedId}:${!!visibleGraph.nodes.length}`;
   async function fitReadable() {
@@ -606,11 +604,9 @@ function CanvasInner(p: Props) {
     const minimum = currentFit.minZoom;
     if (
       !p.preview &&
-      p.readingMode !== "overview" &&
+      (!p.readingMode || p.readingMode === "all") &&
       (width * minimum > wrap.current.clientWidth - 40 ||
-        height * minimum >
-          wrap.current.clientHeight -
-            (p.readingMode === "function" ? 112 : 150))
+        height * minimum > wrap.current.clientHeight - 150)
     )
       navigate(
         g.flows.find((f) => f.id === p.flowId)?.entryId || components[0].id,
@@ -848,25 +844,25 @@ function CanvasInner(p: Props) {
               (p.flowId
                 ? g.flows.find((f) => f.id === p.flowId)?.name
                 : p.readingMode === "overview"
-                  ? "전체 개요"
+                  ? "전체 구조"
                   : "전체 아키텍처")}
           </span>
           <small>
             {p.readingMode === "function"
-              ? "주요 흐름 · 구성요소를 선택해 상세 연결 보기"
+              ? "선택 기능의 연결 · 원본 배치 유지"
               : p.flowId
                 ? p.focused !== false
                   ? "선택 흐름만 보기"
                   : "전체 안에서 강조"
                 : p.readingMode === "overview"
-                  ? "경계를 묶은 요약 · 기능이나 요소를 선택하세요"
+                  ? "모든 구성요소와 연결 · 원본 배치 유지"
                   : "서비스 · 데이터 · 배포 관계"}
           </small>
         </div>
         <div className="canvas-navigation nodrag nopan">
           <span>
             {p.readingMode === "overview"
-              ? "전체 개요 · 기능을 선택해 자세히 보기"
+              ? "전체 구조 · 기능이나 구성요소를 선택하세요"
               : "읽기 크기 유지 · 손 도구로 이동"}
           </span>
           <button
@@ -949,7 +945,8 @@ function CanvasInner(p: Props) {
         )}
         {reading && reading.hiddenEdges > 0 && (
           <div className="reading-note">
-            상세 연결 {reading.hiddenEdges}개 접힘 · 원본과 계산은 유지됩니다
+            다른 연결 {reading.hiddenEdges}개 · 전체 구조에서 모두 볼 수
+            있습니다
           </div>
         )}
         {!g.nodes.length && (

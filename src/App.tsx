@@ -781,7 +781,7 @@ export default function App() {
         </nav>
         <span className="context-help">
           {purpose === "understand"
-            ? "전체 개요 → 기능 → 구성요소 상세"
+            ? "전체 구조 → 기능 → 구성요소 상세"
             : purpose === "design"
               ? "원본 배치에서 구성요소 추가·연결·크기 조절"
               : "전체 원본의 수치와 원인을 진단합니다"}
@@ -950,7 +950,7 @@ export default function App() {
               }}
             >
               <Workflow size={16} />
-              전체 개요
+              전체 구조
             </button>
             {features.map((f) => (
               <button
@@ -1013,7 +1013,7 @@ export default function App() {
                   aria-pressed={readingMode === "overview" && !expandedId}
                   onClick={overview}
                 >
-                  전체 개요
+                  전체 구조
                 </button>
                 <button
                   aria-pressed={readingMode === "function"}
@@ -1160,8 +1160,8 @@ export default function App() {
               {readingMode !== "all" && (
                 <span className="help">
                   {readingMode === "overview"
-                    ? "같은 경계는 묶어서 표시합니다."
-                    : "주요 흐름을 표시합니다."}{" "}
+                    ? "모든 구성요소와 연결을 원본 배치로 표시합니다."
+                    : "선택 기능에 속한 연결을 원본 배치로 표시합니다."}{" "}
                   구성요소를 누르면 실제 연결을 펼칩니다.
                 </span>
               )}
@@ -1244,11 +1244,7 @@ export default function App() {
                 setInspectorOpen(true);
                 if (readingMode === "overview" && !expandedId) {
                   const e = g.edges.find((e) => e.id === id);
-                  if (e)
-                    setExpandedId(
-                      g.nodes.find((n) => n.id === e.source)?.parentId ||
-                        e.source,
-                    );
+                  if (e) setExpandedId(e.source);
                 }
                 stopConnect();
               }}

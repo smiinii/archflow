@@ -72,7 +72,7 @@ export function GraphPreview({
               aria-pressed={view.mode === "overview"}
               onClick={() => changeView(initialView())}
             >
-              전체 개요
+              전체 구조
             </button>
             <select
               aria-label="미리보기 기능"

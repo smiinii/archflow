@@ -53,5 +53,5 @@ export function viewTitle(g: Graph, view: WorkspaceView) {
     ? `${g.nodes.find((n) => n.id === view.expandedId)?.data.name || "구성요소"} · 상세 연결`
     : functionsFor(g).find((f) => f.id === view.featureId)?.name ||
         g.flows.find((f) => f.id === view.flowId)?.name ||
-        (view.mode === "overview" ? "전체 개요" : "전체 원본");
+        (view.mode === "overview" ? "전체 구조" : "전체 원본");
 }

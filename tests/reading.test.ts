@@ -6,7 +6,7 @@ import {
   reconcileViews,
   type Graph,
 } from "../src/lib/model";
-import { readingView, functionsFor, primaryEdges } from "../src/lib/reading";
+import { readingView, functionsFor } from "../src/lib/reading";
 import { analyze } from "../src/lib/analysis";
 import { routeGraph } from "../src/lib/routing";
 import { exampleGraph, buildInterviewPrompt } from "../src/lib/aiPrompt";
@@ -15,6 +15,7 @@ function fixture(): Graph {
   const node = (id: string, catalogId: string) => ({
     ...structuredClone(n),
     id,
+    position: { x: id.length * 110, y: id.charCodeAt(0) * 7 },
     data: { ...structuredClone(n.data), name: id, catalogId },
   });
   const nodes = [
@@ -69,73 +70,108 @@ function fixture(): Graph {
   };
 }
 describe("progressive reading views", () => {
-  it("opens the primary FCM chain, folding actual DB queries without excluding their calculations", () => {
+  it("filters a complete FCM function without pruning real DB calls, moving cards, or changing calculations", () => {
     const g = fixture(),
-      snapshot = structuredClone(g),
-      before = analyze(g, g.flows[0]);
+      snapshot = structuredClone(g);
+    const before = analyze(g, g.flows[0]);
+    g.views = {
+      features: [
+        {
+          id: "push-function",
+          name: "승인 푸시",
+          flowIds: ["push"],
+          mainEdgeIds: ["send"],
+        },
+      ],
+    };
+    g.edges.find((e) => e.id === "device")!.data.detailLevel = "detail";
+    const saved = structuredClone(g);
     const view = readingView(g, "function", ["push"]);
-    expect(view.graph.edges.map((e) => e.id)).toEqual([
-      "poll",
-      "publish",
-      "consume",
-      "send",
-      "deliver",
-    ]);
-    expect(view.graph.nodes.some((n) => n.id === "fcm")).toBe(true);
-    expect(
-      view.graph.nodes.find((n) => n.id === "app")!.position.x,
-    ).toBeGreaterThan(view.graph.nodes.find((n) => n.id === "fcm")!.position.x);
+    expect(view.graph.edges).toEqual(g.edges);
+    expect(view.graph.nodes).toEqual(g.nodes);
     expect(analyze(g, g.flows[0])).toEqual(before);
-    expect(g).toEqual(snapshot);
-    expect(g.edges.find((e) => e.id === "device")!.data.purpose).toBe(
-      "delivery",
-    );
+    expect(g).toEqual(saved);
+    expect(g.nodes).toEqual(snapshot.nodes);
   });
-  it("expands all real incident calls for a selected component and folds back without mutation", () => {
+  it("expands all incident connections, including a different function, and folds back without mutation", () => {
     const g = fixture();
+    g.edges.find((e) => e.id === "device")!.data.flowIds = [];
     const main = readingView(g, "function", ["push"]);
     const detail = readingView(g, "function", ["push"], "worker");
-    expect(detail.graph.edges.map((e) => e.id)).toEqual(
-      expect.arrayContaining(["device", "read", "consume", "send"]),
-    );
-    expect(
-      main.graph.edges.some((e) => e.id === "device" || e.id === "read"),
-    ).toBe(false);
+    expect(main.graph.edges.some((e) => e.id === "device")).toBe(false);
+    expect(detail.graph.edges.map((e) => e.id)).toEqual([
+      "consume",
+      "device",
+      "send",
+      "read",
+    ]);
     expect(detail.graph.nodes.map((n) => n.id)).not.toContain("relay");
-    expect(readingView(g, "all").graph).toBe(g);
+    for (const node of detail.graph.nodes)
+      expect(node).toBe(g.nodes.find((n) => n.id === node.id));
+    expect(readingView(g, "function", ["push"]).graph).toEqual(main.graph);
+    expect(readingView(g, "overview").graph).toBe(g);
   });
-  it("uses explicit business functions and main IDs instead of treating each API as a separate feature", () => {
+  it("uses business feature flow IDs and excludes unrelated flows", () => {
     const g = fixture();
     g.flows.push({ ...g.flows[0], id: "approve" });
+    g.edges.find((e) => e.id === "device")!.data.flowIds = ["approve"];
     g.views = {
       features: [
         {
           id: "approval",
           name: "승인 알림",
           flowIds: ["approve", "push"],
-          mainEdgeIds: ["poll", "publish", "consume", "send", "deliver"],
+          mainEdgeIds: ["send"],
         },
       ],
     };
     expect(graphSchema.safeParse(g).success).toBe(true);
     expect(functionsFor(g)).toHaveLength(1);
-    expect(primaryEdges(g, ["approve", "push"]).map((e) => e.id)).not.toContain(
-      "device",
+    expect(
+      readingView(g, "function", ["push"]).graph.edges.map((e) => e.id),
+    ).not.toContain("device");
+    expect(readingView(g, "function", ["approve", "push"]).graph.edges).toEqual(
+      g.edges,
     );
   });
-  it("collapses a shared execution boundary and bundles parallel edges with original IDs retained", () => {
-    const g = sampleGraph();
-    const snapshot = structuredClone(g);
-    const view = readingView(g, "overview");
+  it("shows every original node, group and edge despite old eight-card overview metadata", () => {
+    const g = sampleGraph(),
+      snapshot = structuredClone(g);
+    g.views = {
+      overviewNodeIds: [g.nodes[0].id],
+      overviewEdgeIds: [g.edges[0].id],
+    };
+    g.edges[1].data.detailLevel = "detail";
+    const saved = structuredClone(g),
+      view = readingView(g, "overview");
+    expect(view.graph).toBe(g);
+    expect(view.graph.nodes).toHaveLength(snapshot.nodes.length);
+    expect(view.graph.edges).toHaveLength(snapshot.edges.length);
+    expect(view.bundles).toEqual({});
+    expect(view.groups).toEqual({});
+    expect(view.hiddenEdges).toBe(0);
+    expect(g).toEqual(saved);
+  });
+  it("keeps parent groups, card sizes and relative/absolute positions in filtered and group detail views", () => {
+    const g = sampleGraph(),
+      snapshot = structuredClone(g);
     const group = g.nodes.find((n) => n.type === "group")!;
-    expect(view.groups[group.id]).toBeGreaterThan(0);
-    expect(view.graph.nodes.every((n) => !n.parentId)).toBe(true);
-    expect(view.graph.edges.every((e) => e.source !== e.target)).toBe(true);
-    expect(
-      Object.values(view.bundles)
-        .flat()
-        .every((id) => g.edges.some((e) => e.id === id)),
-    ).toBe(true);
+    const child = g.nodes.find((n) => n.parentId === group.id)!;
+    for (const view of [
+      readingView(g, "function", [g.flows[0].id]),
+      readingView(g, "overview", [], child.id),
+      readingView(g, "overview", [], group.id),
+    ]) {
+      for (const node of view.graph.nodes) {
+        expect(node).toBe(g.nodes.find((n) => n.id === node.id));
+        if (node.parentId)
+          expect(view.graph.nodes.some((n) => n.id === node.parentId)).toBe(
+            true,
+          );
+      }
+      expect(view.graph.nodes).toContain(group);
+      expect(view.graph.nodes).toContain(child);
+    }
     expect(g).toEqual(snapshot);
   });
   it("keeps full schema compatibility and rejects unknown or unrelated display references", () => {

@@ -16,8 +16,6 @@ export function graphForExchange(graph: Graph): Graph {
 export const exampleGraph: Graph = {
   schemaVersion: 1,
   views: {
-    overviewEdgeIds: ["api-db"],
-    overviewNodeIds: ["api", "db"],
     features: [
       {
         id: "browse",

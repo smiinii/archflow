@@ -121,13 +121,22 @@ describe("workspace purpose and preview transitions", () => {
   it("switches the actual canvas and editability when understand/design are pressed repeatedly", () => {
     render(<App />);
     expect(canvas().getAttribute("data-mode")).toBe("overview");
+    const original = canvas().getAttribute("data-geometry");
+    expect(JSON.parse(original!).nodes).toHaveLength(
+      sampleGraph().nodes.length,
+    );
+    expect(JSON.parse(original!).edges).toHaveLength(
+      sampleGraph().edges.length,
+    );
     for (let i = 0; i < 3; i++) {
       fireEvent.click(purpose("설계하기"));
       expect(canvas().getAttribute("data-mode")).toBe("all");
       expect(canvas().getAttribute("data-readonly")).toBe("false");
+      expect(canvas().getAttribute("data-geometry")).toBe(original);
       fireEvent.click(purpose("이해하기"));
       expect(canvas().getAttribute("data-mode")).toBe("overview");
       expect(canvas().getAttribute("data-readonly")).toBe("true");
+      expect(canvas().getAttribute("data-geometry")).toBe(original);
     }
     expect(purpose("이해하기").getAttribute("aria-pressed")).toBe("true");
   });
