@@ -710,7 +710,7 @@ a {
   border: 1px solid #e5e4eb;
   border-radius: 7px;
   overflow: hidden;
-  bottom: 70px !important;
+  bottom: 16px !important;
 }
 .react-flow__controls button {
   border-bottom: 1px solid #f0eff5;
@@ -723,7 +723,7 @@ a {
   border-radius: 8px;
   border: 1px solid #ebe8f1;
   box-shadow: 0 3px 8px #22213706;
-  bottom: 65px !important;
+  bottom: 16px !important;
   background: #fff !important;
 }
 .react-flow__attribution {
@@ -2804,4 +2804,15 @@ details p {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.flow-navigator {
+  left: 60px;
+  right: 140px;
+}
+@media (max-width: 600px) {
+  .flow-navigator {
+    left: 56px;
+    right: 16px;
+  }
 }

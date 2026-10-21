@@ -705,6 +705,7 @@ function CanvasInner(p: Props) {
           />
           <MiniMap
             className="minimap"
+            style={{ width: 105, height: 80 }}
             pannable
             zoomable
             nodeColor={(n) => (n.type === "group" ? "#eceaf4" : "#c6bfdc")}
