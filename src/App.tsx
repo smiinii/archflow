@@ -32,6 +32,8 @@ import {
   Copy,
   MousePointer2,
   TriangleAlert,
+  Trash2,
+  Undo2,
 } from "lucide-react";
 import type { Connection } from "@xyflow/react";
 import interviewPrompt from "../docs/ai-interview-prompt.txt?raw";
@@ -60,11 +62,19 @@ import { Inspector } from "./components/Inspector";
 import { ConnectionBuilder } from "./components/ConnectionBuilder";
 import { TechIcon } from "./components/Icons";
 import { Modal } from "./components/Modal";
+import { ProjectTree } from "./components/ProjectTree";
+import {
+  deleteProject,
+  moveProject,
+  newProject,
+  restoreProject,
+} from "./lib/projects";
 import "./styles.css";
 
 type Dialog =
   | "library"
   | "projects"
+  | "delete-project"
   | "new-project"
   | "new-folder"
   | "new-flow"
@@ -72,6 +82,12 @@ type Dialog =
   | "ai-apply"
   | "auth"
   | null;
+type ProjectUndo = {
+  project: Project;
+  index: number;
+  fallback: Project | null;
+  owner: string;
+};
 type Selection = { nodes: string[]; edges: string[] };
 export default function App() {
   const storage = useWorkspace();
@@ -88,6 +104,8 @@ export default function App() {
     [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 580),
     [inspectorOpen, setInspectorOpen] = useState(false),
     [connecting, setConnecting] = useState(false),
+    [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null),
+    [projectUndo, setProjectUndo] = useState<ProjectUndo | null>(null),
     [message, setMessage] = useState(""),
     [historyVersion, bumpHistory] = useState(0);
   const canvasSection = useRef<HTMLElement>(null);
@@ -107,6 +125,11 @@ export default function App() {
   const history = useRef<Record<string, { past: Graph[]; future: Graph[] }>>(
     {},
   );
+  useEffect(() => {
+    setProjectUndo(null);
+    setPendingDeleteId(null);
+    setDialog((current) => (current === "delete-project" ? null : current));
+  }, [storage.user?.id]);
   const selectedProject = w?.projects.find((p) => p.id === w.currentProjectId);
   const g = selectedProject?.graph;
   const activeFlow = g?.flows.find((f) => f.id === flowId);
@@ -182,7 +205,9 @@ export default function App() {
       if (
         dialog ||
         (e.target instanceof HTMLElement &&
-          e.target.closest('input,textarea,select,[contenteditable="true"]'))
+          e.target.closest(
+            'input,textarea,select,[contenteditable="true"],[data-project-controls]',
+          ))
       )
         return;
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -502,45 +527,80 @@ export default function App() {
     );
   const flowResult = activeFlow ? analyze(g, activeFlow) : null;
   const problems = Object.values(metrics).filter((m) => m.bad).length;
-  function tree(parent: string | null, depth = 0): React.ReactNode {
-    return (
-      <>
-        {w!.folders
-          .filter((f) => f.parentId === parent)
-          .map((f) => (
-            <div className="folder-block" key={f.id}>
-              <button
-                className={
-                  "directory-row " + (folderId === f.id ? "current" : "")
-                }
-                style={{ paddingLeft: 10 + depth * 12 }}
-                onClick={() => setFolderId(f.id)}
-              >
-                <Folder size={15} />
-                <span>{f.name}</span>
-              </button>
-              {tree(f.id, depth + 1)}
-            </div>
-          ))}
-        {w!.projects
-          .filter((p) => p.folderId === parent)
-          .map((p) => (
-            <button
-              key={p.id}
-              className={
-                "directory-row " +
-                (w!.currentProjectId === p.id ? "active" : "")
-              }
-              style={{ paddingLeft: 10 + depth * 12 }}
-              onClick={() => switchProject(p.id)}
-            >
-              <Workflow size={14} />
-              <span>{p.name}</span>
-            </button>
-          ))}
-      </>
+  function requestProjectDelete(id: string) {
+    setPendingDeleteId(id);
+    setDialog("delete-project");
+  }
+  function confirmProjectDelete() {
+    const index = w!.projects.findIndex((p) => p.id === pendingDeleteId);
+    if (index < 0) {
+      setDialog(null);
+      return;
+    }
+    const project = structuredClone(w!.projects[index]);
+    const fallback = newProject();
+    setProjectUndo({
+      project,
+      index,
+      fallback: w!.projects.length === 1 ? fallback : null,
+      owner: storage.user?.id || "guest",
+    });
+    storage.change((current) => deleteProject(current, project.id, fallback));
+    setDialog(null);
+    setPendingDeleteId(null);
+    setMessage("");
+  }
+  function undoProjectDelete() {
+    if (!projectUndo || projectUndo.owner !== (storage.user?.id || "guest"))
+      return;
+    const next = restoreProject(
+      w!,
+      projectUndo.project,
+      projectUndo.index,
+      projectUndo.fallback,
+    );
+    if (next === w) {
+      setMessage(
+        "복원할 공간이 없습니다. 프로젝트는 최대 100개까지 보관할 수 있습니다.",
+      );
+      return;
+    }
+    storage.change((current) =>
+      restoreProject(
+        current,
+        projectUndo.project,
+        projectUndo.index,
+        projectUndo.fallback,
+      ),
+    );
+    setProjectUndo(null);
+    setMessage("프로젝트를 복원했습니다.");
+  }
+  function moveTreeProject(
+    id: string,
+    folder: string | null,
+    target?: { id: string; after: boolean },
+  ) {
+    if (moveProject(w!, id, folder, target) === w) return;
+    storage.change((current) => moveProject(current, id, folder, target));
+    setFolderId(folder);
+    setMessage(
+      `${w!.projects.find((p) => p.id === id)?.name} · ${w!.folders.find((f) => f.id === folder)?.name || "내 작업공간"}(으)로 이동했습니다.`,
     );
   }
+  function tree() {
+    return (
+      <ProjectTree
+        workspace={w!}
+        folderId={folderId}
+        selectFolder={setFolderId}
+        selectProject={switchProject}
+        deleteProject={requestProjectDelete}
+        moveProject={moveTreeProject}
+      />
+    );
+  }
+  const projectToDelete = w.projects.find((p) => p.id === pendingDeleteId);
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -705,7 +765,7 @@ export default function App() {
                 <FilePlus2 size={15} />
               </button>
             </div>
-            <div className="project-tree">{tree(null)}</div>
+            <div className="project-tree">{tree()}</div>
           </section>
           <section
             className="sidebar-section layer-section"
@@ -1034,17 +1094,76 @@ export default function App() {
         </span>
         <span>가정값 · 실측을 대체하지 않습니다</span>
       </footer>
+      {projectUndo && (
+        <div className="toast project-undo-toast" role="status">
+          <span>{projectUndo.project.name} 삭제됨</span>
+          <button onClick={undoProjectDelete}>
+            <Undo2 size={14} />
+            삭제 취소
+          </button>
+          <button
+            aria-label="프로젝트 삭제 취소 알림 닫기"
+            onClick={() => setProjectUndo(null)}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
       {message && (
-        <div className="toast" role="status">
+        <div
+          className={"toast " + (projectUndo ? "above-project-undo" : "")}
+          role="status"
+        >
           {message}
         </div>
       )}
       {dialog === "library" && (
         <Library close={() => setDialog(null)} add={addComponent} />
       )}
+      {dialog === "delete-project" && projectToDelete && (
+        <Modal
+          title="프로젝트 삭제"
+          close={() => {
+            setDialog(null);
+            setPendingDeleteId(null);
+          }}
+        >
+          <p className="delete-project-question">
+            <strong>{projectToDelete.name}</strong> 프로젝트를 삭제하시겠습니까?
+          </p>
+          <p className="help">
+            아키텍처, API 흐름과 인터뷰 내용이 목록에서 제거됩니다. 마지막
+            삭제는 새로고침 전까지 ‘삭제 취소’로 되돌릴 수 있습니다.
+          </p>
+          {w.projects.length === 1 && (
+            <p className="help">
+              마지막 프로젝트를 삭제하면 빈 ‘새 프로젝트’로 시작합니다.
+            </p>
+          )}
+          <div className="button-row">
+            <button
+              className="outline"
+              autoFocus
+              onClick={() => {
+                setDialog(null);
+                setPendingDeleteId(null);
+              }}
+            >
+              취소
+            </button>
+            <button
+              className="delete-project-confirm"
+              onClick={confirmProjectDelete}
+            >
+              <Trash2 size={15} />
+              프로젝트 삭제
+            </button>
+          </div>
+        </Modal>
+      )}
       {dialog === "projects" && (
         <Modal title="내 프로젝트" close={() => setDialog(null)}>
-          <div className="project-tree modal-tree">{tree(null)}</div>
+          <div className="project-tree modal-tree">{tree()}</div>
           <div className="button-row">
             <button className="outline" onClick={() => setDialog("new-folder")}>
               <FolderPlus size={15} />
@@ -1090,6 +1209,13 @@ export default function App() {
               ))}
             </select>
           </label>
+          <button
+            className="danger"
+            onClick={() => requestProjectDelete(selectedProject.id)}
+          >
+            <Trash2 size={14} />
+            현재 프로젝트 삭제
+          </button>
         </Modal>
       )}
       {(dialog === "new-project" ||
