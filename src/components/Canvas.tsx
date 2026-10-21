@@ -1,4 +1,12 @@
-import { createContext, useContext, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import {
   ReactFlow,
   Background,
@@ -34,6 +42,7 @@ import {
   Ungroup,
   Trash2,
   Maximize,
+  Link2,
 } from "lucide-react";
 import { getItem } from "../lib/catalog";
 import { allMetrics, analyze, fmt, type Metric } from "../lib/analysis";
@@ -58,8 +67,9 @@ type Props = {
   tool: "select" | "pan";
   change: (fn: (g: Graph) => Graph) => void;
   checkpoint: () => void;
-  select: (s: Selection) => void;
+  select: Dispatch<SetStateAction<Selection>>;
   nodeClick: (id: string) => void;
+  startConnect: (id: string) => void;
   connect: (c: Connection) => void;
   setTool: (t: "select" | "pan") => void;
   toggleSnap: () => void;
@@ -78,7 +88,14 @@ const CanvasContext = createContext<{
   active: Set<string> | null;
   source: string | null;
   checkpoint: () => void;
-}>({ metrics: {}, active: null, source: null, checkpoint: () => {} });
+  startConnect: (id: string) => void;
+}>({
+  metrics: {},
+  active: null,
+  source: null,
+  checkpoint: () => {},
+  startConnect: () => {},
+});
 function ComponentNode({
   id,
   data,
@@ -113,6 +130,19 @@ function ComponentNode({
         <span>{item.title}</span>
       </div>
       <strong title={data.name}>{data.name}</strong>
+      {selected && (
+        <button
+          className="node-connect-button nodrag nopan"
+          aria-label={data.name + "에서 연결하기"}
+          onClick={(e) => {
+            e.stopPropagation();
+            context.startConnect(id);
+          }}
+        >
+          <Link2 size={13} />
+          연결
+        </button>
+      )}
       <div className="node-status">
         <span>
           {m?.demand == null
@@ -295,13 +325,15 @@ function CanvasInner(p: Props) {
   function changeNodes(changes: NodeChange[]) {
     const selections = changes.filter((c) => c.type === "select");
     if (selections.length) {
-      const next = new Set(p.selection.nodes);
-      for (const c of selections)
-        if (c.type === "select") {
-          if (c.selected) next.add(c.id);
-          else next.delete(c.id);
-        }
-      p.select({ ...p.selection, nodes: [...next] });
+      p.select((previous) => {
+        const next = new Set(previous.nodes);
+        for (const c of selections)
+          if (c.type === "select") {
+            if (c.selected) next.add(c.id);
+            else next.delete(c.id);
+          }
+        return { ...previous, nodes: [...next] };
+      });
     }
     const edits = changes.filter(
       (c) =>
@@ -352,7 +384,13 @@ function CanvasInner(p: Props) {
   const view = api.getViewport();
   return (
     <CanvasContext.Provider
-      value={{ metrics, active, source: p.source, checkpoint: p.checkpoint }}
+      value={{
+        metrics,
+        active,
+        source: p.source,
+        checkpoint: p.checkpoint,
+        startConnect: p.startConnect,
+      }}
     >
       <div
         className={"canvas-wrap " + (p.tool === "pan" ? "pan-tool" : "")}
@@ -371,13 +409,15 @@ function CanvasInner(p: Props) {
           }}
           onNodesChange={changeNodes}
           onEdgesChange={(changes) => {
-            const selected = new Set(p.selection.edges);
-            for (const c of changes)
-              if (c.type === "select") {
-                if (c.selected) selected.add(c.id);
-                else selected.delete(c.id);
-              }
-            p.select({ ...p.selection, edges: [...selected] });
+            p.select((previous) => {
+              const selected = new Set(previous.edges);
+              for (const c of changes)
+                if (c.type === "select") {
+                  if (c.selected) selected.add(c.id);
+                  else selected.delete(c.id);
+                }
+              return { ...previous, edges: [...selected] };
+            });
           }}
           onNodeClick={(_e, n) => p.nodeClick(n.id)}
           onNodeDragStart={p.checkpoint}
@@ -478,17 +518,21 @@ function CanvasInner(p: Props) {
         >
           <button
             aria-label="선택 도구"
+            title="선택 · 빈 공간을 드래그하면 여러 요소 선택"
             aria-pressed={p.tool === "select"}
             onClick={() => p.setTool("select")}
           >
             <MousePointer2 size={17} />
+            <span>선택</span>
           </button>
           <button
             aria-label="화면 이동"
+            title="이동 · 마우스를 누른 채 끌어 캔버스 이동"
             aria-pressed={p.tool === "pan"}
             onClick={() => p.setTool("pan")}
           >
             <Hand size={17} />
+            <span>이동</span>
           </button>
           <span className="separator" />
           <button

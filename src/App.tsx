@@ -17,10 +17,9 @@ import {
   X,
   MessagesSquare,
   PanelLeft,
-  PanelRight,
-  Download,
-  Upload,
-  History,
+  PanelBottom,
+  Settings2,
+  Link2,
   LogIn,
   LogOut,
   Cloud,
@@ -53,10 +52,11 @@ import {
   type Workspace,
 } from "./lib/model";
 import { useWorkspace } from "./lib/useWorkspace";
-import { downloadJson, loadLocal } from "./lib/storage";
+import { loadLocal } from "./lib/storage";
 import { supabase } from "./lib/supabase";
 import { Canvas } from "./components/Canvas";
 import { Inspector } from "./components/Inspector";
+import { ConnectionBuilder } from "./components/ConnectionBuilder";
 import { TechIcon } from "./components/Icons";
 import { Modal } from "./components/Modal";
 import "./styles.css";
@@ -68,10 +68,8 @@ type Dialog =
   | "new-folder"
   | "new-flow"
   | "ai"
-  | "import"
-  | "versions"
+  | "ai-apply"
   | "auth"
-  | "workspace-import"
   | null;
 type Selection = { nodes: string[]; edges: string[] };
 export default function App() {
@@ -86,7 +84,10 @@ export default function App() {
     [connectionKind, setConnectionKind] =
       useState<Link["data"]["kind"]>("sync"),
     [folderId, setFolderId] = useState<string | null>(null),
-    [panel, setPanel] = useState<"left" | "right" | null>(null),
+    [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 580),
+    [inspectorOpen, setInspectorOpen] = useState(false),
+    [inspectorExpanded, setInspectorExpanded] = useState(false),
+    [connecting, setConnecting] = useState(false),
     [message, setMessage] = useState(""),
     [historyVersion, bumpHistory] = useState(0);
   const history = useRef<Record<string, { past: Graph[]; future: Graph[] }>>(
@@ -159,6 +160,7 @@ export default function App() {
     setSelection({ nodes: [], edges: [] });
     setFlowId(null);
     setSource(null);
+    setConnecting(false);
     setTool("select");
   }, [w?.currentProjectId, storage.user?.id]);
   useEffect(() => {
@@ -185,7 +187,7 @@ export default function App() {
       if (e.key === "Escape") {
         setSource(null);
         setSelection({ nodes: [], edges: [] });
-        setPanel(null);
+        setConnecting(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -198,7 +200,7 @@ export default function App() {
   }, [message]);
   function switchProject(id: string) {
     storage.change((w) => ({ ...w, currentProjectId: id }));
-    setPanel(null);
+    if (window.innerWidth <= 580) setSidebarOpen(false);
     setDialog(null);
   }
   function connect(c: Connection) {
@@ -235,6 +237,9 @@ export default function App() {
         );
       return;
     }
+    setMessage(
+      `${a.data.name} → ${b.data.name} · ${kind === "sync" ? "동기" : kind === "async" ? "비동기" : "구성 관계"} 연결을 추가했습니다.`,
+    );
     updateGraph((g) => ({
       ...g,
       edges: [
@@ -261,7 +266,27 @@ export default function App() {
       ],
     }));
   }
+  function startConnect(
+    id: string | null,
+    kind: Link["data"]["kind"] = connectionKind,
+  ) {
+    setConnecting(true);
+    setInspectorOpen(false);
+    setSource(id);
+    setConnectionKind(kind);
+    setTool("select");
+    if (id) setSelection({ nodes: [id], edges: [] });
+  }
+  function stopConnect() {
+    setConnecting(false);
+    setSource(null);
+  }
   function nodeClick(id: string) {
+    if (connecting && !source) {
+      if (g?.nodes.find((n) => n.id === id)?.type === "component")
+        startConnect(id);
+      return;
+    }
     if (source) {
       if (source !== id)
         connect({
@@ -271,7 +296,7 @@ export default function App() {
           targetHandle: null,
         });
       setSelection({ nodes: [source], edges: [] });
-    } else setPanel("right");
+    } else setInspectorOpen(true);
   }
   function addComponent(catalogId: string, copyId?: string) {
     if (!g) return;
@@ -317,7 +342,7 @@ export default function App() {
     setSelection({ nodes: [id], edges: [] });
     setDialog(null);
     setSource(null);
-    setPanel("right");
+    setInspectorOpen(true);
   }
   function groupSelection() {
     if (!g) return;
@@ -368,7 +393,7 @@ export default function App() {
       ],
     }));
     setSelection({ nodes: [id], edges: [] });
-    setPanel("right");
+    setInspectorOpen(true);
   }
   function ungroup() {
     if (!g) return;
@@ -408,7 +433,6 @@ export default function App() {
       currentProjectId: p.id,
     }));
     setDialog(null);
-    setPanel(null);
   }
   function mergeWorkspace(other: Workspace) {
     const ids = new Map(other.folders.map((f) => [f.id, uid()]));
@@ -506,6 +530,17 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
+        {!sidebarOpen && (
+          <button
+            className="sidebar-reopen"
+            aria-label="왼쪽 사이드바 펼치기"
+            aria-expanded={false}
+            aria-controls="project-sidebar"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <PanelLeft size={19} />
+          </button>
+        )}
         <div className="brand">
           <Workflow size={20} />
           <span>archflow</span>
@@ -523,7 +558,11 @@ export default function App() {
             {storage.user ? <Cloud size={14} /> : <Laptop size={14} />}
             <span>{storage.status}</span>
           </span>
-          <button className="outline" onClick={() => setDialog("ai")}>
+          <button
+            className="outline"
+            aria-label="AI 인터뷰"
+            onClick={() => setDialog("ai")}
+          >
             <MessagesSquare size={15} />
             <span>AI 인터뷰</span>
           </button>
@@ -558,7 +597,7 @@ export default function App() {
                   const n = g.nodes.find((n) => metrics[n.id]?.bad);
                   if (n) {
                     setSelection({ nodes: [n.id], edges: [] });
-                    setPanel("right");
+                    setInspectorOpen(true);
                   }
                 }
               }}
@@ -577,15 +616,17 @@ export default function App() {
         <div className="mobile-panels">
           <button
             aria-label="프로젝트 패널"
-            onClick={() => setPanel(panel === "left" ? null : "left")}
+            aria-expanded={sidebarOpen}
+            onClick={() => setSidebarOpen(!sidebarOpen)}
           >
             <PanelLeft size={17} />
           </button>
           <button
             aria-label="속성 패널"
-            onClick={() => setPanel(panel === "right" ? null : "right")}
+            aria-expanded={inspectorOpen}
+            onClick={() => setInspectorOpen(!inspectorOpen)}
           >
-            <PanelRight size={17} />
+            <PanelBottom size={17} />
           </button>
         </div>
       </div>
@@ -612,137 +653,146 @@ export default function App() {
           ) : (
             <button onClick={() => void storage.sync()}>다시 시도</button>
           )}
-          <button onClick={() => downloadJson(w, "archflow-backup.json")}>
-            백업
-          </button>
         </div>
       )}
       <div
-        className={
-          "workspace " +
-          (panel === "left"
-            ? "show-left "
-            : panel === "right"
-              ? "show-right "
-              : "")
-        }
+        className={`workspace ${sidebarOpen ? "" : "sidebar-collapsed"} ${inspectorOpen ? "" : "inspector-collapsed"} ${inspectorExpanded ? "inspector-expanded" : ""}`}
       >
-        <aside className="sidebar">
-          <div className="sidebar-heading">
-            <span>프로젝트</span>
-            <button
-              aria-label="프로젝트 관리"
-              onClick={() => setDialog("projects")}
-            >
-              <PanelLeft size={15} />
-            </button>
-          </div>
-          <div className="directory-heading">
-            <span>내 작업공간</span>
-            <button
-              aria-label="폴더 만들기"
-              onClick={() => setDialog("new-folder")}
-            >
-              <FolderPlus size={15} />
-            </button>
-            <button
-              aria-label="프로젝트 만들기"
-              onClick={() => setDialog("new-project")}
-            >
-              <FilePlus2 size={15} />
-            </button>
-          </div>
-          <div className="project-tree">{tree(null)}</div>
-          <div className="sidebar-divider" />
-          <div className="sidebar-heading">
-            <span>레이어</span>
-            <button
-              aria-label="구성요소 라이브러리"
-              onClick={() => setDialog("library")}
-            >
-              <Plus size={16} />
-            </button>
-          </div>
-          <div className="layers">
-            {g.nodes.map((n) => (
-              <button
-                key={n.id}
-                className={
-                  "layer-row " +
-                  (selection.nodes.includes(n.id) ? "active" : "")
-                }
-                onClick={(e) => {
-                  if (source) {
-                    nodeClick(n.id);
-                    return;
-                  }
-                  setSelection({
-                    nodes: e.shiftKey
-                      ? [...new Set([...selection.nodes, n.id])]
-                      : [n.id],
-                    edges: [],
-                  });
-                  setPanel("right");
-                }}
-                style={{ paddingLeft: n.parentId ? 24 : 10 }}
-              >
-                {n.type === "group" ? (
-                  <Folder size={14} />
-                ) : (
-                  <TechIcon id={n.data.catalogId} size={18} />
-                )}
-                <span>{n.data.name}</span>
-                {metrics[n.id]?.bad && <i className="problem-dot" />}
-              </button>
-            ))}
-          </div>
-          <div className="sidebar-heading">
-            <span>API 흐름</span>
-            <button
-              aria-label="API 흐름 추가"
-              onClick={() => setDialog("new-flow")}
-            >
-              <Plus size={16} />
-            </button>
-          </div>
-          <button
-            className={"layer-row " + (!validFlow ? "active" : "")}
-            onClick={() => setFlowId(null)}
+        <aside
+          className="sidebar"
+          id="project-sidebar"
+          aria-label="프로젝트와 레이어"
+          hidden={!sidebarOpen}
+        >
+          <section
+            className="sidebar-section workspace-section"
+            aria-label="내 작업공간"
           >
-            <Workflow size={16} />
-            전체 아키텍처
-          </button>
-          {g.flows.map((f) => (
+            <div className="sidebar-heading">
+              <span>프로젝트</span>
+              <div className="sidebar-heading-actions">
+                <button
+                  aria-label="프로젝트 관리"
+                  title="프로젝트 관리"
+                  onClick={() => setDialog("projects")}
+                >
+                  <Settings2 size={15} />
+                </button>
+                <button
+                  aria-label="왼쪽 사이드바 접기"
+                  title="왼쪽 사이드바 접기"
+                  aria-expanded={true}
+                  aria-controls="project-sidebar"
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <PanelLeft size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="directory-heading">
+              <span>내 작업공간</span>
+              <button
+                aria-label="폴더 만들기"
+                onClick={() => setDialog("new-folder")}
+              >
+                <FolderPlus size={15} />
+              </button>
+              <button
+                aria-label="프로젝트 만들기"
+                onClick={() => setDialog("new-project")}
+              >
+                <FilePlus2 size={15} />
+              </button>
+            </div>
+            <div className="project-tree">{tree(null)}</div>
+          </section>
+          <section
+            className="sidebar-section layer-section"
+            aria-label="현재 프로젝트 레이어"
+          >
+            <div className="sidebar-heading">
+              <span>레이어</span>
+              <button
+                aria-label="구성요소 라이브러리"
+                onClick={() => setDialog("library")}
+              >
+                <Plus size={16} />
+              </button>
+            </div>
+            <div className="layers">
+              {g.nodes.map((n) => (
+                <button
+                  key={n.id}
+                  className={
+                    "layer-row " +
+                    (selection.nodes.includes(n.id) ? "active" : "")
+                  }
+                  onClick={(e) => {
+                    if (window.innerWidth <= 580) setSidebarOpen(false);
+                    if (connecting) {
+                      nodeClick(n.id);
+                      return;
+                    }
+                    setSelection({
+                      nodes: e.shiftKey
+                        ? [...new Set([...selection.nodes, n.id])]
+                        : [n.id],
+                      edges: [],
+                    });
+                    setInspectorOpen(true);
+                  }}
+                  style={{ paddingLeft: n.parentId ? 24 : 10 }}
+                >
+                  {n.type === "group" ? (
+                    <Folder size={14} />
+                  ) : (
+                    <TechIcon id={n.data.catalogId} size={18} />
+                  )}
+                  <span>{n.data.name}</span>
+                  {metrics[n.id]?.bad && <i className="problem-dot" />}
+                </button>
+              ))}
+            </div>
+          </section>
+          <section
+            className="sidebar-section flow-section"
+            aria-label="API 흐름"
+          >
+            <div className="sidebar-heading">
+              <span>API 흐름</span>
+              <button
+                aria-label="API 흐름 추가"
+                onClick={() => setDialog("new-flow")}
+              >
+                <Plus size={16} />
+              </button>
+            </div>
             <button
-              key={f.id}
-              className={"layer-row " + (f.id === validFlow ? "active" : "")}
+              className={"layer-row " + (!validFlow ? "active" : "")}
               onClick={() => {
-                setFlowId(f.id);
-                setPanel(null);
+                setFlowId(null);
+                stopConnect();
+                if (window.innerWidth <= 580) setSidebarOpen(false);
               }}
             >
-              <span className="method-mini">{f.method}</span>
-              <span>{f.name}</span>
+              <Workflow size={16} />
+              전체 아키텍처
             </button>
-          ))}
-          <div className="sidebar-bottom">
-            <button onClick={() => setDialog("versions")}>
-              <History size={15} />
-              버전
-            </button>
-            <button
-              onClick={() =>
-                downloadJson(g, `${selectedProject.name}-architecture.json`)
-              }
-            >
-              <Download size={15} />
-              내보내기
-            </button>
-            <button onClick={() => setDialog("import")}>
-              <Upload size={15} />
-              가져오기
-            </button>
-          </div>
+            {g.flows.map((f) => (
+              <button
+                key={f.id}
+                className={"layer-row " + (f.id === validFlow ? "active" : "")}
+                onClick={() => {
+                  setFlowId(f.id);
+                  stopConnect();
+                  if (window.innerWidth <= 580) setSidebarOpen(false);
+                }}
+              >
+                <span className="method-mini">{f.method}</span>
+                <span>{f.name}</span>
+              </button>
+            ))}
+          </section>
         </aside>
         <main className="main-work">
           <div className="trafficbar">
@@ -760,6 +810,24 @@ export default function App() {
                 API 흐름
               </button>
             </div>
+            <button
+              className="outline connect-launch"
+              aria-pressed={connecting}
+              onClick={() =>
+                connecting
+                  ? stopConnect()
+                  : startConnect(
+                      g.nodes.find(
+                        (n) =>
+                          selection.nodes.includes(n.id) &&
+                          n.type === "component",
+                      )?.id || null,
+                    )
+              }
+            >
+              <Link2 size={16} />
+              연결하기
+            </button>
             {activeFlow ? (
               <label className="traffic-rps">
                 유입
@@ -815,6 +883,17 @@ export default function App() {
               <span>흐름 모션</span>
             </label>
           </div>
+          {connecting && (
+            <ConnectionBuilder
+              graph={g}
+              source={source}
+              kind={connectionKind}
+              setSource={(id) => startConnect(id)}
+              setKind={setConnectionKind}
+              connect={connect}
+              close={stopConnect}
+            />
+          )}
           <Canvas
             key={selectedProject.id}
             graph={g}
@@ -828,6 +907,7 @@ export default function App() {
             checkpoint={checkpoint}
             select={setSelection}
             nodeClick={nodeClick}
+            startConnect={(id) => startConnect(id)}
             connect={connect}
             setTool={setTool}
             toggleSnap={() =>
@@ -888,29 +968,30 @@ export default function App() {
         <Inspector
           graph={g}
           flowId={validFlow}
+          open={inspectorOpen}
+          expanded={inspectorExpanded}
+          toggleOpen={() => setInspectorOpen(!inspectorOpen)}
+          toggleExpanded={() => {
+            setInspectorOpen(true);
+            setInspectorExpanded(!inspectorExpanded);
+          }}
           nodeIds={selection.nodes}
           edgeIds={selection.edges}
           source={source}
           connectionKind={connectionKind}
           update={updateGraph}
-          startConnect={(id, kind) => {
-            setSource(id);
-            setConnectionKind(kind);
-            setSelection({ nodes: [id], edges: [] });
-            setTool("select");
-          }}
-          stopConnect={() => setSource(null)}
+          startConnect={startConnect}
+          stopConnect={stopConnect}
           selectNode={(id) => setSelection({ nodes: [id], edges: [] })}
           selectEdge={(id) => {
             setSelection({ nodes: [], edges: [id] });
-            setSource(null);
+            stopConnect();
           }}
           remove={remove}
           duplicate={(id) =>
             addComponent(g.nodes.find((n) => n.id === id)!.data.catalogId, id)
           }
           checkpoint={checkpoint}
-          close={() => setPanel(null)}
         />
       </div>
       <footer className="statusbar">
@@ -978,18 +1059,6 @@ export default function App() {
               ))}
             </select>
           </label>
-          <button
-            className="outline"
-            onClick={() => downloadJson(w, "archflow-workspace.json")}
-          >
-            전체 작업공간 백업
-          </button>
-          <button
-            className="text-button"
-            onClick={() => setDialog("workspace-import")}
-          >
-            작업공간 백업 가져오기
-          </button>
         </Modal>
       )}
       {(dialog === "new-project" ||
@@ -1018,7 +1087,7 @@ export default function App() {
               updateGraph((g) => ({ ...g, flows: [...g.flows, f] }));
               setFlowId(f.id);
               setDialog(null);
-              setPanel("right");
+              setInspectorOpen(true);
             }
           }}
         />
@@ -1027,55 +1096,20 @@ export default function App() {
         <AiDialog
           project={selectedProject}
           update={(text) => updateProject((p) => ({ ...p, interview: text }))}
-          importGraph={() => setDialog("import")}
+          importGraph={() => setDialog("ai-apply")}
           close={() => setDialog(null)}
         />
       )}
-      {(dialog === "import" || dialog === "workspace-import") && (
-        <ImportDialog
-          workspace={dialog === "workspace-import"}
+      {dialog === "ai-apply" && (
+        <AiStructureDialog
           close={() => setDialog(null)}
-          apply={(value) => {
-            if (dialog === "workspace-import")
-              mergeWorkspace(value as Workspace);
-            else
-              addProject(
-                selectedProject.name + " · AI 초안",
-                value as Graph,
-                selectedProject.folderId,
-              );
-          }}
-        />
-      )}
-      {dialog === "versions" && (
-        <Versions
-          project={selectedProject}
-          close={() => setDialog(null)}
-          save={(name) => {
-            updateProject((p) => ({
-              ...p,
-              versions: [
-                {
-                  id: uid(),
-                  name,
-                  createdAt: new Date().toISOString(),
-                  source: "manual" as const,
-                  graph: structuredClone(p.graph),
-                },
-                ...p.versions,
-              ].slice(0, 30),
-            }));
-            setMessage("현재 구조를 버전으로 저장했습니다.");
-          }}
-          restore={(graph) => {
-            checkpoint();
-            updateGraph(() => structuredClone(graph));
-            setSelection({ nodes: [], edges: [] });
-            setDialog(null);
-            setMessage(
-              "버전을 복원했습니다. 실행 취소로 이전 구조로 돌아갈 수 있습니다.",
-            );
-          }}
+          apply={(graph) =>
+            addProject(
+              selectedProject.name + " · AI 초안",
+              graph,
+              selectedProject.folderId,
+            )
+          }
         />
       )}
       {dialog === "auth" && (
@@ -1313,7 +1347,7 @@ function AiDialog({
     edges: [],
     flows: [],
   };
-  const schemaHelp = `\n\n[현재 Archflow의 가져오기 형식]\n인터뷰를 마친 후, 사용자 요청이 있으면 아래 Graph JSON 형식에 맞춘 구조를 추가로 출력할 수 있습니다. 모르는 수치는 null로 두세요. 기존 구조와 개선안은 별도 JSON으로 구분합니다.\n${JSON.stringify(example, null, 2)}\n연결: {id, source, target, data:{kind:"sync"|"async"|"relation",label,flowIds:[],calls:1,traffic:"all"|"cache-miss"}}.\n요청: {id,name,method:"GET"|"POST"|"PUT"|"PATCH"|"DELETE"|"EVENT",route,entryId,rps:null,hitPercent:0,latencyTarget:null,availabilityTarget:null,requiredIds:[]}.\n그룹은 type:"group", catalogId:"group"으로 만들고, 구성원의 parentId를 그룹 ID로 지정합니다. 구성원의 position은 그룹 기준 상대 좌표입니다. ID는 영문·숫자·하이픈·밑줄만 사용합니다. 모든 연결·요청 참조는 실제 ID와 일치해야 합니다. catalogId를 모르면 custom을 사용하고 기술은 note에 기록하세요. JSON은 가져오기 화면에서 검증 후 별도 프로젝트로 생성됩니다.`;
+  const schemaHelp = `\n\n[현재 Archflow의 AI 구조 적용 형식]\n인터뷰를 마친 후, 사용자 요청이 있으면 아래 Graph JSON 형식에 맞춘 구조를 추가로 출력할 수 있습니다. 모르는 수치는 null로 두세요. 기존 구조와 개선안은 별도 JSON으로 구분합니다.\n${JSON.stringify(example, null, 2)}\n연결: {id, source, target, data:{kind:"sync"|"async"|"relation",label,flowIds:[],calls:1,traffic:"all"|"cache-miss"}}.\n요청: {id,name,method:"GET"|"POST"|"PUT"|"PATCH"|"DELETE"|"EVENT",route,entryId,rps:null,hitPercent:0,latencyTarget:null,availabilityTarget:null,requiredIds:[]}.\n그룹은 type:"group", catalogId:"group"으로 만들고, 구성원의 parentId를 그룹 ID로 지정합니다. 구성원의 position은 그룹 기준 상대 좌표입니다. ID는 영문·숫자·하이픈·밑줄만 사용합니다. 모든 연결·요청 참조는 실제 ID와 일치해야 합니다. catalogId를 모르면 custom을 사용하고 기술은 note에 기록하세요. JSON은 AI 구조 적용 화면에서 검증 후 별도 프로젝트로 생성됩니다.`;
   const prompt =
     interviewPrompt +
     schemaHelp +
@@ -1356,12 +1390,6 @@ function AiDialog({
           <Copy size={15} />
           {copied ? "복사했습니다" : "프롬프트 복사"}
         </button>
-        <button
-          className="outline"
-          onClick={() => downloadJson(project.graph, "archflow-context.json")}
-        >
-          현재 구조 내려받기
-        </button>
       </div>
       <label className="field vertical">
         <span>인터뷰 결과 · 서비스 설명</span>
@@ -1374,23 +1402,21 @@ function AiDialog({
         />
       </label>
       <button className="outline" onClick={importGraph}>
-        <Upload size={15} />
-        AI가 만든 구조 검토·가져오기
+        <Check size={15} />
+        AI가 만든 구조 적용
       </button>
     </Modal>
   );
 }
-function ImportDialog({
-  workspace,
+function AiStructureDialog({
   close,
   apply,
 }: {
-  workspace: boolean;
   close: () => void;
-  apply: (value: Graph | Workspace) => void;
+  apply: (value: Graph) => void;
 }) {
   const [text, setText] = useState(""),
-    [parsed, setParsed] = useState<Graph | Workspace | null>(null),
+    [parsed, setParsed] = useState<Graph | null>(null),
     [error, setError] = useState("");
   function validate(value = text) {
     try {
@@ -1400,9 +1426,7 @@ function ImportDialog({
         .replace(/\s*```$/, "");
       if (cleaned.length > 20_000_000)
         throw new Error("20MB 이하로 가져와 주세요.");
-      const next = workspace
-        ? workspaceSchema.parse(JSON.parse(cleaned))
-        : parseGraph(cleaned);
+      const next = parseGraph(cleaned);
       setParsed(next);
       setError("");
     } catch (e) {
@@ -1414,38 +1438,14 @@ function ImportDialog({
     }
   }
   return (
-    <Modal
-      title={workspace ? "작업공간 백업 가져오기" : "구조 검토·가져오기"}
-      close={close}
-      wide
-    >
+    <Modal title="AI 구조 검토·적용" close={close} wide>
       <p className="help">
-        {workspace
-          ? "기존 프로젝트를 유지하며 사본으로 추가합니다."
-          : "현재 구조를 보존하고, 검토한 결과를 새 프로젝트로 만듭니다."}
+        현재 구조를 보존하고, 검토한 AI 결과를 새 프로젝트로 만듭니다.
       </p>
-      <label className="file-label">
-        JSON 파일 선택
-        <input
-          type="file"
-          accept=".json,application/json"
-          onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            if (file.size > 20_000_000) {
-              setError("20MB 이하 파일을 선택해 주세요.");
-              return;
-            }
-            const value = await file.text();
-            setText(value);
-            validate(value);
-          }}
-        />
-      </label>
       <textarea
         className="json-box"
-        aria-label="가져올 JSON"
-        placeholder="JSON을 붙여 넣으세요."
+        aria-label="AI 결과 JSON"
+        placeholder="AI가 작성한 구조 JSON을 붙여 넣으세요."
         value={text}
         onChange={(e) => {
           setText(e.target.value);
@@ -1461,9 +1461,7 @@ function ImportDialog({
       {parsed && (
         <div className="import-preview">
           <Check size={17} />
-          {"projects" in parsed
-            ? `${parsed.projects.length}개 프로젝트 · ${parsed.folders.length}개 폴더`
-            : `${parsed.nodes.length}개 구성요소·그룹 · ${parsed.edges.length}개 연결 · ${parsed.flows.length}개 요청`}
+          {`${parsed.nodes.length}개 구성요소·그룹 · ${parsed.edges.length}개 연결 · ${parsed.flows.length}개 요청`}
           <p>검증 완료 · 새 사본으로 추가됩니다.</p>
           {"nodes" in parsed && (
             <ul>
@@ -1487,99 +1485,9 @@ function ImportDialog({
             if (parsed) apply(parsed);
           }}
         >
-          검토한 구조 가져오기
+          검토한 구조 적용
         </button>
       </div>
-    </Modal>
-  );
-}
-function Versions({
-  project,
-  save,
-  restore,
-  close,
-}: {
-  project: Project;
-  save: (name: string) => void;
-  restore: (graph: Graph) => void;
-  close: () => void;
-}) {
-  const [name, setName] = useState(""),
-    [selected, setSelected] = useState<string | null>(null);
-  const version = project.versions.find((v) => v.id === selected);
-  return (
-    <Modal title="아키텍처 버전" close={close}>
-      <form
-        className="button-row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (name.trim()) {
-            save(name.trim());
-            setName("");
-          }
-        }}
-      >
-        <input
-          aria-label="버전 이름"
-          placeholder="예: 캐시 추가 전"
-          maxLength={100}
-          required
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <button type="submit" className="primary">
-          현재 구조 저장
-        </button>
-      </form>
-      <p className="help">
-        최근 30개를 보관합니다. 더 오래 보관하려면 JSON으로 내보내세요.
-      </p>
-      <div className="version-list">
-        {project.versions.map((v) => (
-          <button
-            key={v.id}
-            aria-pressed={selected === v.id}
-            onClick={() => setSelected(v.id)}
-          >
-            <History size={16} />
-            <span>
-              {v.name}
-              <small>{new Date(v.createdAt).toLocaleString("ko-KR")}</small>
-            </span>
-          </button>
-        ))}
-        {!project.versions.length && (
-          <p className="help">아직 저장한 버전이 없습니다.</p>
-        )}
-      </div>
-      {version && (
-        <div className="import-preview">
-          <p>
-            {version.graph.nodes.length}개 요소 · {version.graph.edges.length}개
-            연결
-          </p>
-          <p>
-            현재 대비 요소{" "}
-            {version.graph.nodes.length - project.graph.nodes.length >= 0
-              ? "+"
-              : ""}
-            {version.graph.nodes.length - project.graph.nodes.length}개
-          </p>
-          <div className="button-row">
-            <button
-              className="outline"
-              onClick={() =>
-                downloadJson(version.graph, `${version.name}.json`)
-              }
-            >
-              내려받기
-            </button>
-            <button className="primary" onClick={() => restore(version.graph)}>
-              이 버전 복원 · 실행 취소 가능
-            </button>
-          </div>
-        </div>
-      )}
     </Modal>
   );
 }

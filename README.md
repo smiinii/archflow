@@ -29,8 +29,10 @@ npm run dev
 - AWS Labs v23.1 아이콘 872종, 백엔드·인프라 75종, LMS·기본 라이브러리 검색
 - 요청 RPS·캐시 적중률·목표, 평균 처리 시간·동시 처리 수·대수·가용성·연결 지연
 - 빨간색 문제 후보와 원인·비교 수치·개선 가정·검증 방법
-- 외부 AI 인터뷰 프롬프트, 결과 메모, JSON 검증·미리보기 후 **새 프로젝트로** 가져오기
-- 프로젝트별 버전 30개, JSON 내보내기/가져오기·전체 작업공간 백업
+- 외부 AI 인터뷰 프롬프트, 결과 메모, JSON 검증·미리보기 후 **새 프로젝트로** AI 구조 적용
+- 접기·펼치기가 가능한 사이드바, 독립적으로 스크롤하는 작업공간·레이어·API 영역
+- 아래쪽의 넓은 속성·진단 패널, 크게 보기와 접기
+- 출발·도착 선택 또는 구성요소를 차례로 클릭하는 연결 만들기, 동기·비동기 선택
 - 로컬 자동 저장, Supabase 이메일 로그인·사용자별 클라우드 저장·충돌 병합
 
 ## Supabase · Vercel
@@ -74,7 +76,8 @@ npm run format
 ## 구조
 
 - `src/components/Canvas.tsx`: React Flow 캔버스·그룹·연결·모션
-- `src/components/Inspector.tsx`: 속성·진단·요청 설정
+- `src/components/Inspector.tsx`: 하단 속성·진단·요청 설정
+- `src/components/ConnectionBuilder.tsx`: 동기·비동기 연결 만들기
 - `src/lib/analysis.ts`: 부하·동기 경로 지연·직렬 가용성
 - `src/lib/model.ts`: 저장·가져오기 스키마와 참조 무결성
 - `src/lib/useWorkspace.ts`: 계정별 IndexedDB·Supabase 동기화
