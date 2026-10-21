@@ -36,7 +36,15 @@ import {
   Undo2,
 } from "lucide-react";
 import type { Connection } from "@xyflow/react";
-import { functionsFor, type ReadingMode } from "./lib/reading";
+import { functionsFor } from "./lib/reading";
+import {
+  initialView,
+  featureView,
+  normalizeView,
+  viewTitle,
+  type Purpose,
+  type WorkspaceView,
+} from "./lib/workspaceView";
 import { buildInterviewPrompt } from "./lib/aiPrompt";
 import { catalog, categoryName, getItem } from "./lib/catalog";
 import { analyze, allMetrics, fmt, percent } from "./lib/analysis";
@@ -99,15 +107,10 @@ export default function App() {
   const storage = useWorkspace();
   const w = storage.workspace;
   const [dialog, setDialog] = useState<Dialog>(null),
-    [flowId, setFlowId] = useState<string | null>(null),
     [focused, setFocused] = useState(true),
-    [readingMode, setReadingMode] = useState<ReadingMode>("overview"),
-    [featureId, setFeatureId] = useState<string | null>(null),
-    [expandedId, setExpandedId] = useState<string | null>(null),
     [labelMode, setLabelMode] = useState<LabelMode>("selected"),
     [layoutPreview, setLayoutPreview] = useState<Graph | null>(null),
     [layoutFitKey, setLayoutFitKey] = useState(0),
-    [purpose, setPurpose] = useState("understand"),
     [tool, setTool] = useState<"select" | "pan">("select"),
     [selection, setSelection] = useState<Selection>({ nodes: [], edges: [] }),
     [source, setSource] = useState<string | null>(null),
@@ -121,6 +124,15 @@ export default function App() {
     [projectUndo, setProjectUndo] = useState<ProjectUndo | null>(null),
     [message, setMessage] = useState(""),
     [historyVersion, bumpHistory] = useState(0);
+  const [view, setView] = useState<WorkspaceView>(() => initialView());
+  const { purpose, mode: readingMode, flowId, featureId, expandedId } = view;
+  const setFlowId = (flowId: string | null) =>
+    setView((v) => ({ ...v, flowId }));
+  const setExpandedId = (expandedId: string | null) =>
+    setView((v) => ({ ...v, expandedId }));
+  const pendingView = useRef<{ projectId: string; view: WorkspaceView } | null>(
+    null,
+  );
   const canvasSection = useRef<HTMLElement>(null);
   const detailsSection = useRef<HTMLDivElement>(null);
   function scrollToSection(element: HTMLElement | null) {
@@ -152,37 +164,47 @@ export default function App() {
     [feature, flowId],
   );
   function overview() {
-    setReadingMode("overview");
-    setFeatureId(null);
-    setFlowId(null);
-    setExpandedId(null);
+    setView(initialView());
     setSelection({ nodes: [], edges: [] });
     stopConnect();
   }
   function chooseFeature(id: string) {
-    const f = features.find((f) => f.id === id);
-    if (!f) return;
-    setFeatureId(id);
-    setFlowId(f.flowIds.length === 1 ? f.flowIds[0] : null);
-    setReadingMode("function");
-    setExpandedId(null);
+    if (!g) return;
+    setView(featureView(g, id));
     setSelection({ nodes: [], edges: [] });
     stopConnect();
   }
   function editAll() {
-    setReadingMode("all");
-    setExpandedId(null);
-    setFeatureId(null);
-    setFlowId(null);
+    setView(initialView("design"));
     setSelection({ nodes: [], edges: [] });
+    stopConnect();
+  }
+  function changePurpose(next: Purpose) {
+    setView(initialView(next));
+    setLayoutPreview(null);
+    setSelection({ nodes: [], edges: [] });
+    stopConnect();
+    if (next === "improve" && g) {
+      const all = allMetrics(g, null);
+      const n =
+        g.nodes.find((n) => all[n.id]?.bad) ||
+        g.nodes.find(
+          (n) => n.type === "component" && n.data.catalogId !== "client",
+        );
+      if (n) setSelection({ nodes: [n.id], edges: [] });
+      setInspectorOpen(true);
+    }
   }
   useEffect(() => {
-    if (featureId && !feature) overview();
-  }, [featureId, feature]);
+    if (g) {
+      const next = normalizeView(g, view);
+      if (JSON.stringify(next) !== JSON.stringify(view)) setView(next);
+    }
+  }, [g, view]);
   const activeFlow = g?.flows.find((f) => f.id === flowId);
   const validFlow = activeFlow ? flowId : null;
   useEffect(() => {
-    setSelection({ nodes: [], edges: [] });
+    if (purpose !== "improve") setSelection({ nodes: [], edges: [] });
   }, [validFlow]);
   const metrics = useMemo(
     () =>
@@ -259,10 +281,14 @@ export default function App() {
   useEffect(() => {
     setSelection({ nodes: [], edges: [] });
     setLayoutPreview(null);
-    setReadingMode("overview");
-    setFeatureId(null);
-    setExpandedId(null);
-    setFlowId(null);
+    const requested = pendingView.current;
+    const next =
+      requested && requested.projectId === w?.currentProjectId && g
+        ? normalizeView(g, requested.view)
+        : initialView(purpose);
+    setView(next);
+    if (next.expandedId) setSelection({ nodes: [next.expandedId], edges: [] });
+    pendingView.current = null;
     setSource(null);
     setConnecting(false);
     setTool("select");
@@ -376,8 +402,13 @@ export default function App() {
     id: string | null,
     kind: Link["data"]["kind"] = connectionKind,
   ) {
-    setReadingMode("all");
-    setExpandedId(null);
+    setView((v) => ({
+      ...v,
+      purpose: "design",
+      mode: "all",
+      featureId: null,
+      expandedId: null,
+    }));
     setConnecting(true);
     requestAnimationFrame(() => scrollToSection(canvasSection.current));
     setSource(id);
@@ -411,8 +442,13 @@ export default function App() {
   }
   function addComponent(catalogId: string, copyId?: string, style?: CardStyle) {
     if (!g) return;
-    setReadingMode("all");
-    setExpandedId(null);
+    setView((v) => ({
+      ...v,
+      purpose: "design",
+      mode: "all",
+      featureId: null,
+      expandedId: null,
+    }));
     if (g.nodes.length >= 1000) {
       setMessage("프로젝트당 최대 1,000개 요소를 지원합니다.");
       return;
@@ -533,7 +569,12 @@ export default function App() {
     });
     setSelection({ nodes: [], edges: [] });
   }
-  function addProject(name: string, graph = emptyGraph(), folder = folderId) {
+  function addProject(
+    name: string,
+    graph = emptyGraph(),
+    folder = folderId,
+    requestedView?: WorkspaceView,
+  ) {
     const p: Project = {
       id: uid(),
       name,
@@ -542,6 +583,8 @@ export default function App() {
       interview: "",
       versions: [],
     };
+    if (requestedView)
+      pendingView.current = { projectId: p.id, view: requestedView };
     storage.change((w) => ({
       ...w,
       projects: [...w.projects, p],
@@ -730,16 +773,7 @@ export default function App() {
             <button
               key={id}
               aria-pressed={purpose === id}
-              onClick={() => {
-                setPurpose(id);
-                if (id === "improve") {
-                  const n = g.nodes.find((n) => metrics[n.id]?.bad);
-                  if (n) {
-                    setSelection({ nodes: [n.id], edges: [] });
-                    setInspectorOpen(true);
-                  }
-                }
-              }}
+              onClick={() => changePurpose(id as Purpose)}
             >
               {title}
             </button>
@@ -747,10 +781,10 @@ export default function App() {
         </nav>
         <span className="context-help">
           {purpose === "understand"
-            ? "흐름과 역할을 읽어보세요"
+            ? "전체 개요 → 기능 → 구성요소 상세"
             : purpose === "design"
-              ? "요구사항을 구조로 옮겨보세요"
-              : "목표와 현재 가정을 비교해 보세요"}
+              ? "원본 배치에서 구성요소 추가·연결·크기 조절"
+              : "전체 원본의 수치와 원인을 진단합니다"}
         </span>
         <div className="mobile-panels">
           <button
@@ -943,10 +977,11 @@ export default function App() {
                   }
                   title={f.name}
                   onClick={() => {
-                    setFlowId(f.id);
-                    setFeatureId(null);
-                    setReadingMode("function");
-                    setExpandedId(null);
+                    setView({
+                      ...initialView(),
+                      mode: "function",
+                      flowId: f.id,
+                    });
                     stopConnect();
                     if (window.innerWidth <= 580) setSidebarOpen(false);
                   }}
@@ -1070,6 +1105,15 @@ export default function App() {
                 <span>흐름 모션</span>
               </label>
             </div>
+            {purpose === "improve" && (
+              <div className="purpose-summary">
+                <strong>개선하기 · 문제 후보 {problems}곳</strong>
+                <span>전체 원본에서 수치와 원인을 확인합니다.</span>
+                <button className="outline" onClick={showDetails}>
+                  진단 보기
+                </button>
+              </div>
+            )}
             <div className="feature-strip" aria-label="기능 선택">
               <span>
                 {expandedId
@@ -1179,11 +1223,7 @@ export default function App() {
               key={selectedProject.id}
               graph={g}
               readingMode={readingMode}
-              readingTitle={
-                expandedId
-                  ? `${g.nodes.find((n) => n.id === expandedId)?.data.name} · 상세 연결`
-                  : feature?.name
-              }
+              readingTitle={viewTitle(g, view)}
               readingFlows={readingFlows}
               expandedId={expandedId}
               readOnly={readingMode !== "all"}
@@ -1281,6 +1321,7 @@ export default function App() {
               graph={g}
               flowId={validFlow}
               open={inspectorOpen}
+              purpose={purpose}
               toggleOpen={() => setInspectorOpen(!inspectorOpen)}
               showCanvas={() => scrollToSection(canvasSection.current)}
               nodeIds={selection.nodes}
@@ -1472,10 +1513,7 @@ export default function App() {
               const f = createFlow(name);
               checkpoint();
               updateGraph((g) => ({ ...g, flows: [...g.flows, f] }));
-              setFlowId(f.id);
-              setFeatureId(null);
-              setReadingMode("function");
-              setExpandedId(null);
+              setView({ ...initialView("design"), flowId: f.id });
               setDialog(null);
               setInspectorOpen(true);
             }
@@ -1494,11 +1532,14 @@ export default function App() {
         <AiStructureDialog
           base={g}
           close={() => setDialog(null)}
-          apply={(graph) =>
+          initialView={initialView(purpose)}
+          labelMode={labelMode}
+          apply={(graph, previewView) =>
             addProject(
               selectedProject.name + " · AI 초안",
               graph,
               selectedProject.folderId,
+              previewView,
             )
           }
         />
@@ -1514,7 +1555,15 @@ export default function App() {
             요소와 그 그룹, 모든 연결과 소속은 유지합니다. 적용 후 실행 취소로
             되돌릴 수 있습니다.
           </p>
-          <GraphPreview graph={layoutPreview} flowId={validFlow} />
+          <p className="help">
+            설계하기의 전체 원본 배치입니다. 적용 후에도 이 원본 배치를 그대로
+            표시합니다.
+          </p>
+          <GraphPreview
+            graph={layoutPreview}
+            view={initialView("design")}
+            labelMode={labelMode}
+          />
           <div className="button-row">
             <button className="outline" onClick={() => setLayoutPreview(null)}>
               취소 · 원본 유지
@@ -1524,6 +1573,7 @@ export default function App() {
               onClick={() => {
                 checkpoint();
                 updateGraph(() => layoutPreview);
+                setView(initialView("design"));
                 setLayoutFitKey((n) => n + 1);
                 setLayoutPreview(null);
                 setMessage(

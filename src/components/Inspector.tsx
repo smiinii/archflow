@@ -27,6 +27,7 @@ import { CardAppearance } from "./CardAppearance";
 import { TechIcon } from "./Icons";
 type Props = {
   graph: Graph;
+  purpose?: "understand" | "design" | "improve";
   flowId: string | null;
   nodeIds: string[];
   edgeIds: string[];
@@ -101,8 +102,13 @@ export function Inspector(p: Props) {
     "properties",
   );
   useEffect(
-    () => setTab(n && metrics[n.id]?.bad ? "diagnosis" : "properties"),
-    [n?.id],
+    () =>
+      setTab(
+        p.purpose === "improve" || (n && metrics[n.id]?.bad)
+          ? "diagnosis"
+          : "properties",
+      ),
+    [n?.id, p.purpose],
   );
   useEffect(() => {
     if (p.flowId) setTab("goals");

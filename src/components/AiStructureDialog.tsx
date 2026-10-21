@@ -20,15 +20,23 @@ import {
 } from "../lib/readability";
 import { type Graph } from "../lib/model";
 import { TechIcon } from "./Icons";
+import {
+  initialView as defaultView,
+  type WorkspaceView,
+} from "../lib/workspaceView";
 import { GraphPreview } from "./GraphPreview";
 import { Modal } from "./Modal";
 export function AiStructureDialog({
   close,
   apply,
   base,
+  initialView = defaultView(),
+  labelMode = "selected",
 }: {
   close: () => void;
-  apply: (g: Graph) => void;
+  apply: (g: Graph, view: WorkspaceView) => void;
+  initialView?: WorkspaceView;
+  labelMode?: import("./Canvas").LabelMode;
   base: Graph;
 }) {
   const [text, setText] = useState(""),
@@ -38,7 +46,7 @@ export function AiStructureDialog({
     [ack, setAck] = useState(false),
     [layout, setLayout] = useState<Graph | null>(null),
     [previousLayout, setPreviousLayout] = useState<Graph | null>(null),
-    [flowId, setFlowId] = useState<string | null>(null),
+    [previewView, setPreviewView] = useState<WorkspaceView>(initialView),
     [compare, setCompare] = useState(false),
     [aligned, setAligned] = useState(true),
     [copied, setCopied] = useState(false);
@@ -62,7 +70,7 @@ export function AiStructureDialog({
     setAck(false);
     setPreviousLayout(null);
     setLayout(null);
-    setFlowId(null);
+    setPreviewView(initialView);
   }
   function locate(issue: ImportIssue) {
     const range = jsonFieldRange(text, issue.path);
@@ -85,8 +93,9 @@ export function AiStructureDialog({
   return (
     <Modal title="AI 구조 검토·적용" close={close} wide>
       <p className="help">
-        현재 구조를 보존하고 새 프로젝트에 적용합니다. 입력한 좌표·크기·소속
-        그룹은 배치를 직접 적용할 때만 바뀝니다.
+        현재 구조를 보존하고 새 프로젝트에 적용합니다. 적용 후에는 선택한
+        미리보기와 같은 화면으로 열립니다. 입력한 좌표·크기·소속 그룹은 배치를
+        직접 적용할 때만 바뀝니다.
       </p>
       <textarea
         ref={input}
@@ -120,7 +129,7 @@ export function AiStructureDialog({
         <button
           className="primary"
           disabled={!!blocked}
-          onClick={() => parsed && apply(parsed)}
+          onClick={() => parsed && apply(parsed, previewView)}
         >
           검토한 구조 적용
         </button>
@@ -304,21 +313,6 @@ export function AiStructureDialog({
             카드는 논리 데이터 영역일 수 있으므로 그룹·메모를 확인하세요.
           </p>
           <div className="preview-controls">
-            <label>
-              미리볼 흐름{" "}
-              <select
-                aria-label="가져오기 흐름 미리보기"
-                value={flowId || ""}
-                onChange={(e) => setFlowId(e.target.value || null)}
-              >
-                <option value="">전체 구조</option>
-                {parsed.flows.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.name}
-                  </option>
-                ))}
-              </select>
-            </label>
             <button
               className="outline"
               onClick={() => setLayout(readableLayout(parsed))}
@@ -377,6 +371,7 @@ export function AiStructureDialog({
                   onClick={() => {
                     setPreviousLayout(parsed);
                     setParsed(layout);
+                    setPreviewView(defaultView("design"));
                     setLayout(null);
                   }}
                 >
@@ -391,7 +386,10 @@ export function AiStructureDialog({
           <GraphPreview
             key={layout ? "layout" : "original"}
             graph={layout || parsed}
-            flowId={flowId}
+            view={layout ? defaultView("design") : previewView}
+            onViewChange={setPreviewView}
+            labelMode={labelMode}
+            controls={!layout}
           />
           <details
             open={compare}

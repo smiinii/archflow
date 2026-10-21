@@ -70,6 +70,7 @@ type Selection = { nodes: string[]; edges: string[] };
 export type LabelMode = "hidden" | "selected" | "all";
 type Props = {
   readingMode?: ReadingMode;
+  preview?: boolean;
   readingTitle?: string;
   readingFlows?: string[];
   expandedId?: string | null;
@@ -578,6 +579,7 @@ function CanvasInner(p: Props) {
           } as const,
         }
       : {}),
+    ...(p.preview ? { minZoom: 0.15 } : {}),
     nodes: visibleGraph.nodes
       .filter((n) => n.type !== "group")
       .map((n) => ({ id: n.id })),
@@ -600,6 +602,7 @@ function CanvasInner(p: Props) {
       Math.min(...rectangles.map((r) => r.y));
     const minimum = currentFit.minZoom;
     if (
+      !p.preview &&
       p.readingMode !== "overview" &&
       (width * minimum > wrap.current.clientWidth - 40 ||
         height * minimum >
