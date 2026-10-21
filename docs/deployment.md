@@ -2,6 +2,20 @@
 
 이 저장소는 Vercel에 배포할 수 있는 Vite 앱입니다. 운영 DB와 배포 계정은 사용자의 Supabase·Vercel 프로젝트에 연결합니다. 저장소에 인증 정보가 포함되어 있지 않습니다.
 
+## 현재 배포 상태
+
+2026-10-21 기준:
+
+- 운영 사이트: https://archflow-nine-delta.vercel.app/
+- Vercel: `chalkak` Hobby의 독립 프로젝트 `archflow`. GitHub 앱 접근은 `smiinii/archflow` 한 저장소로 제한했습니다. `main` 푸시가 운영 배포 대상입니다.
+- Supabase: `archflow`, 프로젝트 ref `aeeqojkdaviwtgjzsabv`, 서울 리전. 마이그레이션을 적용했습니다.
+- 운영 환경에 `VITE_SUPABASE_URL`과 `VITE_SUPABASE_PUBLISHABLE_KEY`를 등록했습니다. Preview에는 운영 DB 변수를 등록하지 않았습니다.
+- Auth의 Site URL과 Redirect URLs는 운영 origin으로 설정했고, Email provider와 이메일 확인이 활성화되어 있습니다.
+- Vercel Ready 상태, HTTPS 사이트, 로그인 화면, API별 경로와 병목 진단 화면을 확인했습니다. 실제 DB에서 RLS 활성화, 익명 읽기·저장 차단, 로그인 사용자 읽기·저장 함수 권한, 직접 UPDATE 차단을 확인했습니다.
+- 실제 이메일 링크 로그인과 계정별 저장·다른 기기 복원은 사용자 로그인 후 추가 검증해야 합니다.
+
+현재 기본 이메일 발송 서비스를 사용합니다. 이 서비스는 **Supabase 조직 팀원의 이메일에만 발송**하며, 현재 시간당 2통 제한이 있습니다. 일반 사용자에게 이메일 로그인을 제공하려면 별도 SMTP와 발신 도메인을 연결해야 합니다. 계정·도메인·SMTP 자격증명은 아직 제공되지 않았습니다. [Supabase 공식 SMTP 안내](https://supabase.com/docs/guides/auth/auth-smtp)를 따릅니다. 로그인 전 편집과 로컬 저장은 바로 사용할 수 있습니다.
+
 ## 1. Supabase 만들기
 
 1. Supabase에서 프로젝트를 생성합니다. 조직·리전·요금제는 사용자의 계정에서 선택합니다.

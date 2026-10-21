@@ -95,6 +95,6 @@
 | 계정별 로컬·클라우드·충돌                        | useWorkspace·Supabase SQL         | IndexedDB·인증 모의 테스트·PostgreSQL RLS/CAS 테스트 |
 | Vercel 빌드·환경 변수·Supabase 안내              | vercel.json·deployment.md·CI 예시 | 로컬 프로덕션 빌드                                   |
 
-- **운영 서비스 미검증**: 사용자 Supabase 프로젝트에 마이그레이션 실행과 환경 변수 등록이 필요하다. 실제 이메일 로그인, 기기 간 클라우드 복원, Vercel 배포는 해당 계정 연결 뒤 확인한다.
+- **운영 배포 완료**: https://archflow-nine-delta.vercel.app/ . Supabase 서울 리전에 전용 프로젝트를 생성해 마이그레이션과 실제 DB 권한 검증을 완료했다. Vercel 운영 환경 변수·GitHub 단일 저장소 연결·로그인 복귀 주소를 설정했고 Ready 상태와 배포된 편집기·로그인 UI를 확인했다. 실제 이메일 링크 로그인·클라우드 복원은 사용자 로그인 후 추가 검증이 필요하다. 기본 메일은 Supabase 팀원 주소만 지원하므로 일반 사용자 이메일 로그인에는 별도 SMTP가 필요하다. 상세 상태는 `deployment.md`를 따른다.
 - 저장 방식은 초기 관계형 분할 제안을 단순화해 사용자별 `workspaces` JSONB 스냅샷과 revision을 사용했다. 폴더/프로젝트/API/버전의 원자적 저장을 우선했다. 한도와 추후 프로젝트별 테이블 분리는 README·deployment.md에 적었다.
 - 실시간 공동 편집, MCP 직접 제어와 운영 서버 자동 수집은 기존 합의대로 후속 검토 항목이다. 이번 앱은 외부 AI 프롬프트·JSON 교환을 지원한다.
