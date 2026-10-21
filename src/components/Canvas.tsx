@@ -1,5 +1,6 @@
 import {
   createContext,
+  useEffect,
   useContext,
   useMemo,
   useRef,
@@ -17,7 +18,7 @@ import {
   Position,
   BaseEdge,
   EdgeLabelRenderer,
-  getSmoothStepPath,
+  useViewport,
   MarkerType,
   SelectionMode,
   ReactFlowProvider,
@@ -31,7 +32,6 @@ import {
 } from "@xyflow/react";
 import {
   AlertCircle,
-  Check,
   Hand,
   Magnet,
   MousePointer2,
@@ -45,7 +45,7 @@ import {
   Link2,
 } from "lucide-react";
 import { getItem } from "../lib/catalog";
-import { allMetrics, analyze, fmt, type Metric } from "../lib/analysis";
+import { allMetrics, fmt, type Metric } from "../lib/analysis";
 import {
   absolutePosition,
   sortNodes,
@@ -53,11 +53,18 @@ import {
   type Link,
   type Vertex,
 } from "../lib/model";
+import { CARD_MIN, flowView, type Change } from "../lib/readability";
+import { routeGraph, type Route } from "../lib/routing";
 import { snapPosition, type Guide } from "../lib/alignment";
 import { TechIcon } from "./Icons";
 import "@xyflow/react/dist/style.css";
 type Selection = { nodes: string[]; edges: string[] };
+export type LabelMode = "hidden" | "selected" | "all";
 type Props = {
+  focused?: boolean;
+  labelMode?: LabelMode;
+  readOnly?: boolean;
+  changes?: Change[];
   graph: Graph;
   flowId: string | null;
   motion: boolean;
@@ -90,6 +97,8 @@ const CanvasContext = createContext<{
   source: string | null;
   checkpoint: () => void;
   startConnect: (id: string) => void;
+  changes?: Change[];
+  edgeSelect?: (id: string) => void;
 }>({
   metrics: {},
   active: null,
@@ -113,19 +122,43 @@ function ComponentNode({
         (m?.bad ? "problem " : "") +
         (selected ? "chosen " : "") +
         (context.source === id ? "source " : "") +
-        (muted ? "faded" : "")
+        (muted ? "faded " : "") +
+        (context.changes
+          ?.find((c) => c.scope === "node" && c.id === id)
+          ?.kinds.includes("삭제")
+          ? "diff-removed "
+          : context.changes
+                ?.find((c) => c.scope === "node" && c.id === id)
+                ?.kinds.includes("추가")
+            ? "diff-added "
+            : context.changes?.some(
+                  (c) => c.scope === "node" && c.id === id && c.kinds.length,
+                )
+              ? "diff-changed "
+              : "")
       }
     >
       <NodeResizer
         isVisible={selected}
-        minWidth={156}
-        minHeight={114}
+        minWidth={CARD_MIN.width}
+        minHeight={CARD_MIN.height}
         onResizeStart={context.checkpoint}
         handleClassName="resize-dot"
         lineClassName="resize-line"
       />
-      <Handle type="target" position={Position.Top} id="top-in" />
-      <Handle type="target" position={Position.Left} id="left-in" />
+      {Object.entries({
+        top: Position.Top,
+        right: Position.Right,
+        bottom: Position.Bottom,
+        left: Position.Left,
+      }).map(([side, position]) => (
+        <Handle
+          key={side}
+          type="target"
+          position={position}
+          id={`${side}-in`}
+        />
+      ))}
       <div className="node-tech">
         <TechIcon id={data.catalogId} />
         <span>{item.title}</span>
@@ -167,15 +200,40 @@ function ComponentNode({
           )}
         </span>
       </div>
-      <Handle type="source" position={Position.Bottom} id="bottom-out" />
-      <Handle type="source" position={Position.Right} id="right-out" />
+      {Object.entries({
+        top: Position.Top,
+        right: Position.Right,
+        bottom: Position.Bottom,
+        left: Position.Left,
+      }).map(([side, position]) => (
+        <Handle
+          key={side}
+          type="source"
+          position={position}
+          id={`${side}-out`}
+        />
+      ))}
     </div>
   );
 }
-function GroupNode({ data, selected }: NodeProps<Node<Vertex["data"]>>) {
-  const { checkpoint } = useContext(CanvasContext);
+function GroupNode({ id, data, selected }: NodeProps<Node<Vertex["data"]>>) {
+  const { checkpoint, changes } = useContext(CanvasContext);
   return (
-    <div className={"architecture-group " + (selected ? "chosen" : "")}>
+    <div
+      className={
+        "architecture-group " +
+        (selected ? "chosen " : "") +
+        (changes
+          ?.find((c) => c.scope === "node" && c.id === id)
+          ?.kinds.includes("삭제")
+          ? "diff-removed"
+          : changes?.some(
+                (c) => c.scope === "node" && c.id === id && c.kinds.length,
+              )
+            ? "diff-changed"
+            : "")
+      }
+    >
       <NodeResizer
         minWidth={200}
         minHeight={160}
@@ -184,7 +242,7 @@ function GroupNode({ data, selected }: NodeProps<Node<Vertex["data"]>>) {
         handleClassName="resize-dot"
         lineClassName="resize-line"
       />
-      <div className="group-title">
+      <div className="group-title" title={data.name}>
         <Group size={13} />
         {data.name}
       </div>
@@ -200,16 +258,62 @@ function GroupNode({ data, selected }: NodeProps<Node<Vertex["data"]>>) {
   );
 }
 function FlowEdge(props: EdgeProps) {
-  const [path, x, y] = getSmoothStepPath({ ...props, borderRadius: 12 });
+  const { zoom } = useViewport();
+  const ctx = useContext(CanvasContext);
   const d = props.data as {
     kind: Link["data"]["kind"];
     label: string;
+    note?: string;
+    condition?: string;
+    purpose?: string;
+    traffic: string;
     motion: boolean;
     bad: boolean;
+    route: Route;
+    labelMode: LabelMode;
+    changed: boolean;
+    removed: boolean;
+    faded: boolean;
   };
-  const color = d.bad ? "#ce5b6b" : props.selected ? "#7565d5" : "#aaaebc";
+  const route = d.route;
+  if (!route?.path || route.blocked) return null;
+  const path = route.path;
+  const color = d.removed
+    ? "#ce6873"
+    : d.changed
+      ? "#c58a38"
+      : d.bad
+        ? "#ce5b6b"
+        : props.selected
+          ? "#7565d5"
+          : d.purpose === "dependency"
+            ? "#91a3b4"
+            : "#aaaebc";
+  const full = [
+    d.label,
+    d.kind === "async"
+      ? "비동기 · 작업 완료는 별도"
+      : d.kind === "sync"
+        ? "동기 · 응답 대기"
+        : "구성 관계",
+    d.purpose === "dependency"
+      ? "상태 확인·의존 연결 (전달 계산 제외)"
+      : "주 전달 경로",
+    d.traffic === "cache-miss" ? "캐시 미스일 때" : "",
+    d.condition,
+    d.note,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const visible =
+    (!d.faded || props.selected) &&
+    route.label &&
+    zoom >= 0.7 &&
+    d.labelMode !== "hidden" &&
+    (d.labelMode === "all" || props.selected);
   return (
     <>
+      <title>{full}</title>
       <BaseEdge
         id={props.id}
         path={path}
@@ -217,7 +321,12 @@ function FlowEdge(props: EdgeProps) {
         interactionWidth={22}
         style={{
           stroke: color,
-          strokeWidth: props.selected ? 2 : 1.4,
+          opacity: d.faded ? 0.18 : 1,
+          strokeWidth: props.selected
+            ? 2.3
+            : d.purpose === "dependency"
+              ? 1
+              : 1.5,
           strokeDasharray:
             d.kind === "async"
               ? "7 5"
@@ -228,6 +337,7 @@ function FlowEdge(props: EdgeProps) {
       />
       {d.motion &&
         d.kind !== "relation" &&
+        d.purpose !== "dependency" &&
         [0, 1].map((i) => (
           <circle
             key={i}
@@ -243,28 +353,41 @@ function FlowEdge(props: EdgeProps) {
             />
           </circle>
         ))}
-      <EdgeLabelRenderer>
-        <span
-          className="edge-label"
-          style={{
-            transform: `translate(-50%, -50%) translate(${x}px,${y}px)`,
-          }}
-        >
-          {d.label}
-          {d.kind === "async"
-            ? " · 비동기"
-            : d.kind === "relation"
-              ? " · 구성"
-              : ""}
-        </span>
-      </EdgeLabelRenderer>
+      {visible && route.label?.anchor && (
+        <path
+          d={`M ${route.label.anchor.x} ${route.label.anchor.y} L ${route.label.x + route.label.width / 2} ${route.label.y + route.label.height / 2}`}
+          stroke="#c4bfd1"
+          strokeWidth={0.8}
+          fill="none"
+          pointerEvents="none"
+        />
+      )}
+      {visible && route.label && (
+        <EdgeLabelRenderer>
+          <button
+            className="edge-label nodrag nopan"
+            title={full}
+            aria-label={full}
+            style={{
+              transform: `translate(${route.label.x}px,${route.label.y}px)`,
+              width: route.label.width,
+              height: route.label.height,
+            }}
+            onClick={() => ctx.edgeSelect?.(props.id)}
+            onFocus={() => ctx.edgeSelect?.(props.id)}
+          >
+            {route.label.text}
+          </button>
+        </EdgeLabelRenderer>
+      )}
     </>
   );
 }
 const nodeTypes = { component: ComponentNode, group: GroupNode },
   edgeTypes = { flow: FlowEdge };
 const fitOptions = {
-  padding: { top: "44px", right: "40px", bottom: "88px", left: "40px" },
+  padding: { top: "64px", right: "16px", bottom: "136px", left: "16px" },
+  minZoom: 0.85,
   maxZoom: 1,
 } as const;
 export function Canvas(props: Props) {
@@ -280,53 +403,153 @@ function CanvasInner(p: Props) {
     [alt, setAlt] = useState(false);
   const api = useReactFlow();
   const lastFit = useRef(-1);
+  const wrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = wrap.current;
+    if (!element) return;
+    let previous = { width: element.clientWidth, height: element.clientHeight };
+    const observer = new ResizeObserver(() => {
+      const next = { width: element.clientWidth, height: element.clientHeight };
+      if (
+        previous.width &&
+        previous.height &&
+        (next.width !== previous.width || next.height !== previous.height)
+      ) {
+        const v = api.getViewport();
+        void api.setViewport(
+          {
+            ...v,
+            x: v.x + (next.width - previous.width) / 2,
+            y: v.y + (next.height - previous.height) / 2,
+          },
+          { duration: 0 },
+        );
+      }
+      previous = next;
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [api]);
   const metrics = useMemo(() => allMetrics(g, p.flowId), [g, p.flowId]);
   const active = useMemo(
     () =>
       p.flowId
-        ? analyze(
-            g,
-            g.flows.find((f) => f.id === p.flowId)!,
-          ).reached
+        ? new Set(
+            g.edges
+              .filter((e) => e.data.flowIds.includes(p.flowId!))
+              .flatMap((e) => [e.source, e.target])
+              .concat(g.flows.find((f) => f.id === p.flowId)?.entryId || []),
+          )
         : null,
     [g, p.flowId],
   );
-  const nodes = sortNodes(g.nodes).map((n) => ({
+  const visibleGraph = useMemo(() => {
+    const view = flowView(g, p.flowId, p.focused ?? true);
+    return view;
+  }, [g, p.flowId, p.focused]);
+  const routes = useMemo(() => routeGraph(visibleGraph), [visibleGraph]);
+  const nodes = sortNodes(visibleGraph.nodes).map((n) => ({
     ...n,
-    measured: { width: n.width, height: n.height },
-    style: { width: n.width, height: n.height },
+    width: n.type === "group" ? n.width : Math.max(n.width, CARD_MIN.width),
+    height: n.type === "group" ? n.height : Math.max(n.height, CARD_MIN.height),
+    measured: {
+      width: n.type === "group" ? n.width : Math.max(n.width, CARD_MIN.width),
+      height:
+        n.type === "group" ? n.height : Math.max(n.height, CARD_MIN.height),
+    },
+    style: {
+      width: n.type === "group" ? n.width : Math.max(n.width, CARD_MIN.width),
+      height:
+        n.type === "group" ? n.height : Math.max(n.height, CARD_MIN.height),
+    },
     selected: p.selection.nodes.includes(n.id),
     dragHandle: n.type === "group" ? ".group-title" : undefined,
     zIndex: n.type === "group" ? 0 : 2,
   })) as Node[];
-  const handles = (edge: Link) => {
-    const source = g.nodes.find((n) => n.id === edge.source)!;
-    const target = g.nodes.find((n) => n.id === edge.target)!;
-    const a = absolutePosition(source, g.nodes),
-      b = absolutePosition(target, g.nodes);
-    const horizontal =
-      b.x > a.x + source.width && Math.abs(b.y - a.y) < Math.abs(b.x - a.x);
-    return {
-      sourceHandle:
-        edge.sourceHandle || (horizontal ? "right-out" : "bottom-out"),
-      targetHandle: edge.targetHandle || (horizontal ? "left-in" : "top-in"),
-    };
-  };
-  const edges = g.edges
-    .filter((e) => !p.flowId || e.data.flowIds.includes(p.flowId))
+  const edges = visibleGraph.edges
+    .filter((e) => routes[e.id])
     .map((e) => ({
       ...e,
-      ...handles(e),
+      sourceHandle: routes[e.id].sourceHandle,
+      targetHandle: routes[e.id].targetHandle,
       type: "flow",
       selected: p.selection.edges.includes(e.id),
+      domAttributes: { onFocus: () => p.edgeClick(e.id) },
+      ariaLabel: `${e.data.label || "연결"} · ${e.data.note || ""} · ${e.data.kind} · Enter로 선택 후 아래 상세 정보에서 확인`,
       markerEnd: {
         type: MarkerType.ArrowClosed,
         width: 14,
         height: 14,
         color: metrics[e.target]?.bad ? "#ce5b6b" : "#aaaebc",
       },
-      data: { ...e.data, motion: p.motion, bad: metrics[e.target]?.bad },
+      data: {
+        ...e.data,
+        route: routes[e.id],
+        labelMode: p.labelMode || "selected",
+        motion: p.motion && (!p.flowId || e.data.flowIds.includes(p.flowId)),
+        faded: !!p.flowId && !e.data.flowIds.includes(p.flowId),
+        bad: metrics[e.target]?.bad,
+        changed: p.changes?.some(
+          (c) => c.scope === "edge" && c.id === e.id && c.kinds.length,
+        ),
+        removed: p.changes?.some(
+          (c) =>
+            c.scope === "edge" && c.id === e.id && c.kinds.includes("삭제"),
+        ),
+      },
     })) as Edge[];
+  const currentFit = {
+    ...fitOptions,
+    nodes: visibleGraph.nodes
+      .filter((n) => n.type !== "group")
+      .map((n) => ({ id: n.id })),
+  };
+  const signature = `${p.flowId}:${p.focused}:${p.fitKey}`;
+  async function fitReadable() {
+    await api.fitView({ ...currentFit, duration: 0 });
+    const components = visibleGraph.nodes.filter((n) => n.type !== "group");
+    if (!components.length || !wrap.current) return;
+    const rectangles = components.map((n) => ({
+      ...absolutePosition(n, visibleGraph.nodes),
+      width: n.width,
+      height: n.height,
+    }));
+    const width =
+      Math.max(...rectangles.map((r) => r.x + r.width)) -
+      Math.min(...rectangles.map((r) => r.x));
+    const height =
+      Math.max(...rectangles.map((r) => r.y + r.height)) -
+      Math.min(...rectangles.map((r) => r.y));
+    if (
+      width * 0.85 > wrap.current.clientWidth - 24 ||
+      height * 0.85 > wrap.current.clientHeight - 150
+    )
+      navigate(
+        g.flows.find((f) => f.id === p.flowId)?.entryId || components[0].id,
+      );
+  }
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fitReadable();
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [signature]);
+  const navigate = (id: string) => {
+    const n = visibleGraph.nodes.find((n) => n.id === id);
+    if (!n) return;
+    const r = nodeRectForView(n);
+    void api.setCenter(
+      r.x + n.width / 2,
+      r.y + n.height / 2 + (p.flowId ? 45 : 20),
+      {
+        zoom: 1,
+        duration: 0,
+      },
+    );
+  };
+  function nodeRectForView(n: Vertex) {
+    return absolutePosition(n, visibleGraph.nodes);
+  }
   function changeNodes(changes: NodeChange[]) {
     const selections = changes.filter((c) => c.type === "select");
     if (selections.length) {
@@ -344,7 +567,7 @@ function CanvasInner(p: Props) {
       (c) =>
         c.type === "position" || (c.type === "dimensions" && c.setAttributes),
     );
-    if (!edits.length) return;
+    if (!edits.length || p.readOnly) return;
     let dx = 0,
       dy = 0;
     const moving = edits.find(
@@ -378,8 +601,14 @@ function CanvasInner(p: Props) {
             if (c.type === "dimensions" && c.dimensions && c.setAttributes)
               next = {
                 ...next,
-                width: Math.max(140, c.dimensions.width),
-                height: Math.max(100, c.dimensions.height),
+                width: Math.max(
+                  n.type === "group" ? 200 : CARD_MIN.width,
+                  c.dimensions.width,
+                ),
+                height: Math.max(
+                  n.type === "group" ? 160 : CARD_MIN.height,
+                  c.dimensions.height,
+                ),
               };
           }
         return next;
@@ -394,10 +623,13 @@ function CanvasInner(p: Props) {
         active,
         source: p.source,
         checkpoint: p.checkpoint,
-        startConnect: p.startConnect,
+        startConnect: p.readOnly ? () => {} : p.startConnect,
+        changes: p.changes,
+        edgeSelect: p.edgeClick,
       }}
     >
       <div
+        ref={wrap}
         className={"canvas-wrap " + (p.tool === "pan" ? "pan-tool" : "")}
         onPointerMove={(e) => setAlt(e.altKey)}
       >
@@ -408,7 +640,7 @@ function CanvasInner(p: Props) {
           edgeTypes={edgeTypes}
           onInit={() => {
             if (lastFit.current !== p.fitKey) {
-              api.fitView(fitOptions);
+              void fitReadable();
               lastFit.current = p.fitKey;
             }
           }}
@@ -441,7 +673,7 @@ function CanvasInner(p: Props) {
           }
           onMoveEnd={() => setGuides([])}
           fitView
-          fitViewOptions={fitOptions}
+          fitViewOptions={currentFit}
           zoomOnScroll={false}
           preventScrolling={false}
           zoomActivationKeyCode="Control"
@@ -454,8 +686,8 @@ function CanvasInner(p: Props) {
           panActivationKeyCode="Space"
           multiSelectionKeyCode="Shift"
           selectionKeyCode={null}
-          nodesDraggable={p.tool === "select"}
-          nodesConnectable
+          nodesDraggable={!p.readOnly && p.tool === "select"}
+          nodesConnectable={!p.readOnly}
           proOptions={{ hideAttribution: false }}
           ariaLabelConfig={{
             "node.a11yDescription.default":
@@ -466,7 +698,11 @@ function CanvasInner(p: Props) {
           }}
         >
           <Background color="#d9dce4" gap={20} size={1} />
-          <Controls showInteractive={false} fitViewOptions={fitOptions} />
+          <Controls
+            showInteractive={false}
+            fitViewOptions={currentFit}
+            onFitView={() => void fitReadable()}
+          />
           <MiniMap
             className="minimap"
             pannable
@@ -498,16 +734,105 @@ function CanvasInner(p: Props) {
             );
           })}
         </svg>
-        <div className="canvas-caption">
+        <div
+          className="canvas-caption"
+          title={
+            g.flows.find((f) => f.id === p.flowId)?.name || "전체 아키텍처"
+          }
+        >
           <span>
             {p.flowId
               ? g.flows.find((f) => f.id === p.flowId)?.name
               : "전체 아키텍처"}
           </span>
           <small>
-            {p.flowId ? "선택한 요청의 경로" : "서비스 · 데이터 · 배포 관계"}
+            {p.flowId
+              ? p.focused !== false
+                ? "선택 흐름만 보기"
+                : "전체 안에서 강조"
+              : "서비스 · 데이터 · 배포 관계"}
           </small>
         </div>
+        <div className="canvas-navigation nodrag nopan">
+          <span>읽기 크기 유지 · 손 도구로 이동</span>
+          <button
+            className="outline"
+            onClick={() => void api.fitView({ ...currentFit, minZoom: 0.15 })}
+          >
+            전체 윤곽
+          </button>
+          <select
+            aria-label="구성요소로 이동"
+            value=""
+            onChange={(e) => navigate(e.target.value)}
+          >
+            <option value="">요소로 이동…</option>
+            {visibleGraph.nodes
+              .filter((n) => n.type !== "group")
+              .map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.data.name}
+                </option>
+              ))}
+          </select>
+          {Object.values(routes).some((r) => r.blocked) && (
+            <strong role="status">
+              겹친 박스로 연결{" "}
+              {Object.values(routes).filter((r) => r.blocked).length}개를 표시할
+              수 없습니다. 배치 미리보기로 간격을 확보하세요.
+            </strong>
+          )}
+        </div>
+        {p.selection.edges.length === 1 && (
+          <div className="canvas-edge-detail" role="status">
+            <strong>
+              {g.edges.find((e) => e.id === p.selection.edges[0])?.data.label}
+            </strong>
+            <span>
+              {g.edges.find((e) => e.id === p.selection.edges[0])?.data.note ||
+                "상세 설정은 아래 속성에서 확인하세요."}
+            </span>
+          </div>
+        )}
+        {p.flowId && (
+          <div className="flow-navigator" aria-label="흐름 구성요소 탐색">
+            <span>
+              연결 따라가기 <small>실행 순서·병렬 여부는 확인 필요</small>
+            </span>
+            <div>
+              {(() => {
+                const flow = g.flows.find((f) => f.id === p.flowId);
+                const seen = new Set<string>();
+                const queue = flow?.entryId ? [flow.entryId] : [];
+                const ordered: string[] = [];
+                while (queue.length) {
+                  const id = queue.shift()!;
+                  if (seen.has(id)) continue;
+                  seen.add(id);
+                  ordered.push(id);
+                  for (const e of visibleGraph.edges.filter(
+                    (e) =>
+                      e.data.flowIds.includes(p.flowId!) &&
+                      e.source === id &&
+                      e.data.purpose !== "dependency" &&
+                      e.data.kind !== "relation",
+                  ))
+                    if (!seen.has(e.target)) queue.push(e.target);
+                }
+                return ordered.map((id, i) => (
+                  <button
+                    key={id}
+                    title={g.nodes.find((n) => n.id === id)?.data.name}
+                    onClick={() => navigate(id)}
+                  >
+                    <span>↳</span>
+                    {g.nodes.find((n) => n.id === id)?.data.name}
+                  </button>
+                ));
+              })()}
+            </div>
+          </div>
+        )}
         {!g.nodes.length && (
           <div className="canvas-empty">
             <div className="empty-icon">
@@ -520,75 +845,82 @@ function CanvasInner(p: Props) {
             </button>
           </div>
         )}
-        <div
-          className="canvas-dock"
-          role="toolbar"
-          aria-label="캔버스 편집 도구"
-        >
-          <button
-            aria-label="선택 도구"
-            title="선택 · 빈 공간을 드래그하면 여러 요소 선택"
-            aria-pressed={p.tool === "select"}
-            onClick={() => p.setTool("select")}
+        {!p.readOnly && (
+          <div
+            className="canvas-dock"
+            role="toolbar"
+            aria-label="캔버스 편집 도구"
           >
-            <MousePointer2 size={17} />
-            <span>선택</span>
-          </button>
-          <button
-            aria-label="화면 이동"
-            title="이동 · 마우스를 누른 채 끌어 캔버스 이동"
-            aria-pressed={p.tool === "pan"}
-            onClick={() => p.setTool("pan")}
-          >
-            <Hand size={17} />
-            <span>이동</span>
-          </button>
-          <span className="separator" />
-          <button
-            aria-label="자동 정렬 맞춤"
-            aria-pressed={p.snap}
-            onClick={p.toggleSnap}
-          >
-            <Magnet size={17} />
-          </button>
-          <button aria-label="구성요소 추가" onClick={p.add}>
-            <Plus size={18} />
-          </button>
-          <button
-            aria-label="선택을 그룹으로 묶기"
-            onClick={p.group}
-            disabled={!p.selection.nodes.length}
-          >
-            <Group size={18} />
-          </button>
-          <button
-            aria-label="그룹 해제"
-            onClick={p.ungroup}
-            disabled={!p.selection.nodes.length}
-          >
-            <Ungroup size={18} />
-          </button>
-          <span className="separator" />
-          <button aria-label="실행 취소" disabled={!p.canUndo} onClick={p.undo}>
-            <Undo2 size={17} />
-          </button>
-          <button aria-label="다시 실행" disabled={!p.canRedo} onClick={p.redo}>
-            <Redo2 size={17} />
-          </button>
-          <button
-            aria-label="선택 삭제"
-            onClick={p.remove}
-            disabled={!p.selection.nodes.length && !p.selection.edges.length}
-          >
-            <Trash2 size={17} />
-          </button>
-          <button
-            aria-label="전체 맞춤"
-            onClick={() => api.fitView(fitOptions)}
-          >
-            <Maximize size={17} />
-          </button>
-        </div>
+            <button
+              aria-label="선택 도구"
+              title="선택 · 빈 공간을 드래그하면 여러 요소 선택"
+              aria-pressed={p.tool === "select"}
+              onClick={() => p.setTool("select")}
+            >
+              <MousePointer2 size={17} />
+              <span>선택</span>
+            </button>
+            <button
+              aria-label="화면 이동"
+              title="이동 · 마우스를 누른 채 끌어 캔버스 이동"
+              aria-pressed={p.tool === "pan"}
+              onClick={() => p.setTool("pan")}
+            >
+              <Hand size={17} />
+              <span>이동</span>
+            </button>
+            <span className="separator" />
+            <button
+              aria-label="자동 정렬 맞춤"
+              aria-pressed={p.snap}
+              onClick={p.toggleSnap}
+            >
+              <Magnet size={17} />
+            </button>
+            <button aria-label="구성요소 추가" onClick={p.add}>
+              <Plus size={18} />
+            </button>
+            <button
+              aria-label="선택을 그룹으로 묶기"
+              onClick={p.group}
+              disabled={!p.selection.nodes.length}
+            >
+              <Group size={18} />
+            </button>
+            <button
+              aria-label="그룹 해제"
+              onClick={p.ungroup}
+              disabled={!p.selection.nodes.length}
+            >
+              <Ungroup size={18} />
+            </button>
+            <span className="separator" />
+            <button
+              aria-label="실행 취소"
+              disabled={!p.canUndo}
+              onClick={p.undo}
+            >
+              <Undo2 size={17} />
+            </button>
+            <button
+              aria-label="다시 실행"
+              disabled={!p.canRedo}
+              onClick={p.redo}
+            >
+              <Redo2 size={17} />
+            </button>
+            <button
+              aria-label="선택 삭제"
+              onClick={p.remove}
+              disabled={!p.selection.nodes.length && !p.selection.edges.length}
+            >
+              <Trash2 size={17} />
+            </button>
+            <button aria-label="전체 맞춤" onClick={() => void fitReadable()}>
+              <Maximize size={17} />
+            </button>
+          </div>
+        )}
       </div>
     </CanvasContext.Provider>
   );

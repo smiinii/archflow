@@ -37,14 +37,19 @@ import {
 } from "lucide-react";
 import type { Connection } from "@xyflow/react";
 import interviewPrompt from "../docs/ai-interview-prompt.txt?raw";
-import { catalog, categoryName, getItem } from "./lib/catalog";
+import {
+  catalog,
+  catalogMappingText,
+  promptCatalogIds,
+  categoryName,
+  getItem,
+} from "./lib/catalog";
 import { analyze, allMetrics, fmt, percent } from "./lib/analysis";
 import {
   absolutePosition,
   createFlow,
   defaultParams,
   emptyGraph,
-  parseGraph,
   removeElements,
   uid,
   workspaceSchema,
@@ -57,7 +62,10 @@ import {
 import { useWorkspace } from "./lib/useWorkspace";
 import { loadLocal } from "./lib/storage";
 import { supabase } from "./lib/supabase";
-import { Canvas } from "./components/Canvas";
+import { Canvas, type LabelMode } from "./components/Canvas";
+import { AiStructureDialog } from "./components/AiStructureDialog";
+import { GraphPreview } from "./components/GraphPreview";
+import { readableLayout, layoutWarnings } from "./lib/readability";
 import { Inspector } from "./components/Inspector";
 import { ConnectionBuilder } from "./components/ConnectionBuilder";
 import { TechIcon } from "./components/Icons";
@@ -94,6 +102,10 @@ export default function App() {
   const w = storage.workspace;
   const [dialog, setDialog] = useState<Dialog>(null),
     [flowId, setFlowId] = useState<string | null>(null),
+    [focused, setFocused] = useState(true),
+    [labelMode, setLabelMode] = useState<LabelMode>("selected"),
+    [layoutPreview, setLayoutPreview] = useState<Graph | null>(null),
+    [layoutFitKey, setLayoutFitKey] = useState(0),
     [purpose, setPurpose] = useState("understand"),
     [tool, setTool] = useState<"select" | "pan">("select"),
     [selection, setSelection] = useState<Selection>({ nodes: [], edges: [] }),
@@ -134,6 +146,9 @@ export default function App() {
   const g = selectedProject?.graph;
   const activeFlow = g?.flows.find((f) => f.id === flowId);
   const validFlow = activeFlow ? flowId : null;
+  useEffect(() => {
+    setSelection({ nodes: [], edges: [] });
+  }, [validFlow]);
   const metrics = useMemo(
     () => (g ? allMetrics(g, validFlow) : {}),
     [g, validFlow],
@@ -195,6 +210,7 @@ export default function App() {
   }, [selection, checkpoint, updateGraph]);
   useEffect(() => {
     setSelection({ nodes: [], edges: [] });
+    setLayoutPreview(null);
     setFlowId(null);
     setSource(null);
     setConnecting(false);
@@ -287,8 +303,8 @@ export default function App() {
           id: uid(),
           source: c.source!,
           target: c.target!,
-          sourceHandle: c.sourceHandle || null,
-          targetHandle: c.targetHandle || null,
+          sourceHandle: (c.sourceHandle || null) as Link["sourceHandle"],
+          targetHandle: (c.targetHandle || null) as Link["targetHandle"],
           data: {
             kind,
             label:
@@ -368,8 +384,8 @@ export default function App() {
             x: 180 + (g.nodes.length % 4) * 210,
             y: 160 + Math.floor(g.nodes.length / 4) * 160,
           },
-          width: 172,
-          height: 116,
+          width: 220,
+          height: 148,
           data: {
             catalogId,
             name: item.name,
@@ -842,7 +858,10 @@ export default function App() {
             {g.flows.map((f) => (
               <button
                 key={f.id}
-                className={"layer-row " + (f.id === validFlow ? "active" : "")}
+                className={
+                  "layer-row flow-row " + (f.id === validFlow ? "active" : "")
+                }
+                title={f.name}
                 onClick={() => {
                   setFlowId(f.id);
                   stopConnect();
@@ -923,6 +942,7 @@ export default function App() {
                           f.id === activeFlow.id
                             ? {
                                 ...f,
+                                trafficBasis: "assumption",
                                 rps:
                                   e.target.value === ""
                                     ? null
@@ -963,6 +983,50 @@ export default function App() {
                 <span>흐름 모션</span>
               </label>
             </div>
+            <div className="view-options">
+              {validFlow && (
+                <>
+                  <div className="view-toggle">
+                    <button
+                      aria-pressed={focused}
+                      onClick={() => setFocused(true)}
+                    >
+                      선택 흐름만 보기
+                    </button>
+                    <button
+                      aria-pressed={!focused}
+                      onClick={() => setFocused(false)}
+                    >
+                      전체 안에서 강조
+                    </button>
+                  </div>
+                  <button
+                    className="text-button"
+                    onClick={() => setFlowId(null)}
+                  >
+                    전체 구조로 돌아가기
+                  </button>
+                </>
+              )}
+              <label>
+                연결 설명{" "}
+                <select
+                  aria-label="연결 설명 표시"
+                  value={labelMode}
+                  onChange={(e) => setLabelMode(e.target.value as LabelMode)}
+                >
+                  <option value="hidden">설명 숨기기</option>
+                  <option value="selected">선택한 연결만</option>
+                  <option value="all">모두 보기</option>
+                </select>
+              </label>
+              <button
+                className="text-button"
+                onClick={() => setLayoutPreview(readableLayout(g))}
+              >
+                배치 미리보기
+              </button>
+            </div>
             {connecting && (
               <ConnectionBuilder
                 graph={g}
@@ -977,6 +1041,8 @@ export default function App() {
             <Canvas
               key={selectedProject.id}
               graph={g}
+              focused={focused}
+              labelMode={labelMode}
               flowId={validFlow}
               motion={w.preferences.motion}
               snap={w.preferences.snap}
@@ -1009,7 +1075,7 @@ export default function App() {
               redo={redo}
               canUndo={!!historyState?.past.length}
               canRedo={!!historyState?.future.length}
-              fitKey={0}
+              fitKey={layoutFitKey}
             />
             <div className="findings">
               <div>
@@ -1259,6 +1325,7 @@ export default function App() {
       )}
       {dialog === "ai-apply" && (
         <AiStructureDialog
+          base={g}
           close={() => setDialog(null)}
           apply={(graph) =>
             addProject(
@@ -1268,6 +1335,41 @@ export default function App() {
             )
           }
         />
+      )}
+      {layoutPreview && (
+        <Modal
+          title="배치 변경 미리보기"
+          close={() => setLayoutPreview(null)}
+          wide
+        >
+          <p className="help">
+            박스 크기·위치와 그룹 여백을 조정합니다. 연결과 소속은 유지합니다.
+            적용 후 실행 취소로 되돌릴 수 있습니다.
+          </p>
+          <GraphPreview graph={layoutPreview} flowId={validFlow} />
+          <div className="button-row">
+            <button className="outline" onClick={() => setLayoutPreview(null)}>
+              취소 · 원본 유지
+            </button>
+            <button
+              className="primary"
+              onClick={() => {
+                checkpoint();
+                updateGraph(() => layoutPreview);
+                setLayoutFitKey((n) => n + 1);
+                setLayoutPreview(null);
+                setMessage(
+                  "배치를 적용했습니다. 실행 취소로 되돌릴 수 있습니다.",
+                );
+              }}
+            >
+              이 배치 적용
+            </button>
+          </div>
+          {layoutWarnings(layoutPreview).length > 0 && (
+            <p className="notice">일부 여백을 더 확인해 주세요.</p>
+          )}
+        </Modal>
       )}
       {dialog === "auth" && (
         <AuthDialog
@@ -1381,7 +1483,9 @@ function Library({
   return (
     <Modal title="구성요소 라이브러리" close={close} wide>
       <p className="help">
-        AWS Labs v23.1 아이콘 872종 · 백엔드·인프라 75종 · LMS·기본 구성요소
+        AWS Labs v23.1 아이콘 872종 · 백엔드·인프라{" "}
+        {catalog.filter((c) => c.provider === "backend").length}종 · LMS·기본
+        구성요소
       </p>
       <label className="search-field">
         <Search size={16} />
@@ -1491,8 +1595,8 @@ function AiDialog({
         id: "api",
         type: "component",
         position: { x: 100, y: 100 },
-        width: 172,
-        height: 116,
+        width: 220,
+        height: 148,
         data: {
           catalogId: "api",
           name: "회원 API",
@@ -1504,10 +1608,14 @@ function AiDialog({
     edges: [],
     flows: [],
   };
-  const schemaHelp = `\n\n[현재 Archflow의 AI 구조 적용 형식]\n인터뷰를 마친 후, 사용자 요청이 있으면 아래 Graph JSON 형식에 맞춘 구조를 추가로 출력할 수 있습니다. 모르는 수치는 null로 두세요. 기존 구조와 개선안은 별도 JSON으로 구분합니다.\n${JSON.stringify(example, null, 2)}\n연결: {id, source, target, data:{kind:"sync"|"async"|"relation",label,flowIds:[],calls:1,traffic:"all"|"cache-miss"}}.\n요청: {id,name,method:"GET"|"POST"|"PUT"|"PATCH"|"DELETE"|"EVENT",route,entryId,rps:null,hitPercent:0,latencyTarget:null,availabilityTarget:null,requiredIds:[]}.\n그룹은 type:"group", catalogId:"group"으로 만들고, 구성원의 parentId를 그룹 ID로 지정합니다. 구성원의 position은 그룹 기준 상대 좌표입니다. ID는 영문·숫자·하이픈·밑줄만 사용합니다. 모든 연결·요청 참조는 실제 ID와 일치해야 합니다. catalogId를 모르면 custom을 사용하고 기술은 note에 기록하세요. JSON은 AI 구조 적용 화면에서 검증 후 별도 프로젝트로 생성됩니다.`;
+  const schemaHelp = `\n\n[현재 Archflow의 AI 구조 적용 형식]\n인터뷰를 마친 후, 사용자 요청이 있으면 아래 Graph JSON 형식에 맞춘 구조를 추가로 출력할 수 있습니다. meanMs·slots·availability·networkMs·budgetMs·demand·rps·목표 수치만 모르면 null로 둡니다. replicas는 1, calls는 1, hitPercent는 0을 형식상 기본값으로 사용하고 params.basis, flow.trafficBasis/cacheBasis, edge.callsBasis를 unknown으로 표시하세요. 기존 구조와 개선안은 같은 ID·이름·크기·절대 위치를 유지한 별도 JSON으로 구분합니다.\n${JSON.stringify(example, null, 2)}\n연결: {id, source, target, data:{kind:"sync"|"async"|"relation",label,flowIds:[],calls:1,callsBasis:"unknown",purpose:"delivery"|"dependency",note:"상세 설명",condition:"조건",traffic:"all"|"cache-miss"}}.\n요청: {id,name,method:"GET"|"POST"|"PUT"|"PATCH"|"DELETE"|"EVENT",route,entryId,responseId:null,completionId:null,rps:null,trafficBasis:"unknown",hitPercent:0,cacheBasis:"unknown",latencyTarget:null,availabilityTarget:null,requiredIds:[]}.\n그룹은 type:"group", catalogId:"group"으로 만들고, 구성원의 parentId를 그룹 ID로 지정합니다. 구성원의 position은 그룹 기준 상대 좌표입니다. ID는 영문·숫자·하이픈·밑줄만 사용합니다. 모든 연결·요청 참조는 실제 ID와 일치해야 합니다. catalogId는 아래 실제 지원 ID 목록에서 정확히 고르세요. 없는 기술만 custom으로 명시하고 note에 기록하세요. style·색상·임의 아이콘 URL은 지원하지 않으므로 생성하지 마세요. 카드 최소 200×148px, 권장 280×180px, 그룹 제목 여백 48px·경계 여백 28px을 확보합니다. 연결 label은 최대 100자이지만 캔버스는 12자로 줄여 보이므로 짧은 이름을 쓰고 상세는 note에 둡니다. DB 상태 읽기·발행 상태 갱신은 purpose:dependency로 분리하되 실제 전달 호출은 delivery로 둡니다. 명확한 근거 없이 자동 분류하지 마세요. responseId는 HTTP 응답 완료, completionId는 비동기 최종 완료 지점이며 FCM 수락과 기기 화면 표시를 구분하세요. JSON은 AI 구조 적용 화면에서 검증 후 별도 프로젝트로 생성됩니다.`;
   const prompt =
     interviewPrompt +
     schemaHelp +
+    "\n\n[주요 지원 catalogId = 기술명 · 전체 목록은 AI 구조 적용에서 복사 가능]\n" +
+    catalogMappingText(
+      promptCatalogIds(project.graph.nodes.map((n) => n.data.catalogId)),
+    ) +
     (include
       ? "\n\n[현재 캔버스 — 실제 서비스인지 먼저 확인할 참고 자료]\n" +
         JSON.stringify(project.graph, null, 2)
@@ -1562,89 +1670,6 @@ function AiDialog({
         <Check size={15} />
         AI가 만든 구조 적용
       </button>
-    </Modal>
-  );
-}
-function AiStructureDialog({
-  close,
-  apply,
-}: {
-  close: () => void;
-  apply: (value: Graph) => void;
-}) {
-  const [text, setText] = useState(""),
-    [parsed, setParsed] = useState<Graph | null>(null),
-    [error, setError] = useState("");
-  function validate(value = text) {
-    try {
-      const cleaned = value
-        .trim()
-        .replace(/^```(?:json)?\s*/, "")
-        .replace(/\s*```$/, "");
-      if (cleaned.length > 20_000_000)
-        throw new Error("20MB 이하로 가져와 주세요.");
-      const next = parseGraph(cleaned);
-      setParsed(next);
-      setError("");
-    } catch (e) {
-      setParsed(null);
-      setError(
-        "형식을 확인해 주세요. " +
-          (e instanceof Error ? e.message : String(e)).slice(0, 600),
-      );
-    }
-  }
-  return (
-    <Modal title="AI 구조 검토·적용" close={close} wide>
-      <p className="help">
-        현재 구조를 보존하고, 검토한 AI 결과를 새 프로젝트로 만듭니다.
-      </p>
-      <textarea
-        className="json-box"
-        aria-label="AI 결과 JSON"
-        placeholder="AI가 작성한 구조 JSON을 붙여 넣으세요."
-        value={text}
-        onChange={(e) => {
-          setText(e.target.value);
-          setParsed(null);
-          setError("");
-        }}
-      />
-      {error && (
-        <pre className="validation-error" role="alert">
-          {error}
-        </pre>
-      )}
-      {parsed && (
-        <div className="import-preview">
-          <Check size={17} />
-          {`${parsed.nodes.length}개 구성요소·그룹 · ${parsed.edges.length}개 연결 · ${parsed.flows.length}개 요청`}
-          <p>검증 완료 · 새 사본으로 추가됩니다.</p>
-          {"nodes" in parsed && (
-            <ul>
-              {parsed.nodes.slice(0, 12).map((n) => (
-                <li key={n.id}>
-                  {n.data.name} · {getItem(n.data.catalogId).title}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-      <div className="button-row">
-        <button className="outline" onClick={() => validate()}>
-          형식 검증·미리보기
-        </button>
-        <button
-          className="primary"
-          disabled={!parsed}
-          onClick={() => {
-            if (parsed) apply(parsed);
-          }}
-        >
-          검토한 구조 적용
-        </button>
-      </div>
     </Modal>
   );
 }

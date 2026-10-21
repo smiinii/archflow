@@ -20,3 +20,6 @@ Permission is hereby granted, free of charge, to any person obtaining a copy of 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+- **Firebase logomark and Cloud Messaging product icon**, Google: unmodified SVGs from the official [Firebase brand assets](https://firebase.google.com/brand-guidelines) downloaded on 2026-10-21. These identify Firebase technologies in user diagrams; they are not Archflow branding. Google trademarks remain with their owner. Sources: `firebase-brand-assets.zip` → `Logomark_Full Color.svg` and `Product_Logomark_Cloud_Messaging_Full_Color.svg`.
+- **Slack icon**, Devicon v2.17.0 (MIT): local unmodified copy of [`slack-original.svg`](https://github.com/devicons/devicon/blob/v2.17.0/icons/slack/slack-original.svg). Slack trademarks remain with their owner.

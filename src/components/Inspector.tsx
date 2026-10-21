@@ -22,6 +22,7 @@ import {
   type Params,
   type Vertex,
 } from "../lib/model";
+import { CARD_MIN, fitGroups } from "../lib/readability";
 import { TechIcon } from "./Icons";
 type Props = {
   graph: Graph;
@@ -282,7 +283,9 @@ export function Inspector(p: Props) {
               <NumberField
                 label="유입 · RPS"
                 value={flow.rps}
-                onChange={(rps) => flowUpdate({ rps })}
+                onChange={(rps) =>
+                  flowUpdate({ rps, trafficBasis: "assumption" })
+                }
                 checkpoint={p.checkpoint}
               />
               <NumberField
@@ -290,7 +293,10 @@ export function Inspector(p: Props) {
                 max={100}
                 value={flow.hitPercent}
                 onChange={(hitPercent) =>
-                  flowUpdate({ hitPercent: hitPercent ?? 0 })
+                  flowUpdate({
+                    hitPercent: hitPercent ?? 0,
+                    cacheBasis: "assumption",
+                  })
                 }
                 checkpoint={p.checkpoint}
                 hint="‘캐시 미스’로 지정한 연결에 적용합니다."
@@ -318,6 +324,60 @@ export function Inspector(p: Props) {
                   허용하는 목표입니다.
                 </p>
               )}
+              {(
+                [
+                  ["trafficBasis", "유입 RPS 근거"],
+                  ["cacheBasis", "캐시 적중률 근거"],
+                ] as const
+              ).map(([key, title]) => (
+                <label className="field vertical" key={key}>
+                  <span>{title}</span>
+                  <select
+                    value={flow[key] || "assumption"}
+                    onChange={(e) => {
+                      p.checkpoint();
+                      flowUpdate({ [key]: e.target.value });
+                    }}
+                  >
+                    <option value="unknown">
+                      확인 필요 · 기본값으로 계산하지 않음
+                    </option>
+                    <option value="assumption">설계 가정</option>
+                    <option value="measured">측정값</option>
+                  </select>
+                </label>
+              ))}
+              <p className="metric-defaults">
+                대수·호출 1과 적중률 0은 입력 기본값일 수 있습니다. 수치 근거가
+                확인 필요이면 관련 계산은 미지정으로 남깁니다. 이전 형식에서
+                근거가 없는 호출·적중률은 기존 설계 가정으로 읽습니다.
+              </p>
+              {(
+                [
+                  ["responseId", "HTTP 응답 완료 지점"],
+                  ["completionId", "비동기 최종 완료 지점"],
+                ] as const
+              ).map(([key, title]) => (
+                <label className="field vertical" key={key}>
+                  <span>{title}</span>
+                  <select
+                    value={flow[key] || ""}
+                    onChange={(e) => {
+                      p.checkpoint();
+                      flowUpdate({ [key]: e.target.value || null });
+                    }}
+                  >
+                    <option value="">확인 필요</option>
+                    {p.graph.nodes
+                      .filter((n) => n.type === "component")
+                      .map((n) => (
+                        <option value={n.id} key={n.id}>
+                          {n.data.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              ))}
               <FlowResult graph={p.graph} flow={flow} />
             </section>
             <section className="inspector-section">
@@ -409,14 +469,76 @@ export function Inspector(p: Props) {
               </p>
             </section>
             <section className="inspector-section">
+              <h3>전달·의존 구분</h3>
+              <label className="field vertical">
+                <span>연결의 목적</span>
+                <select
+                  value={edge.data.purpose || "delivery"}
+                  onChange={(e) => {
+                    p.checkpoint();
+                    edgeData({
+                      purpose: e.target.value as "delivery" | "dependency",
+                    });
+                  }}
+                >
+                  <option value="delivery">
+                    주 전달 경로 · 호출 계산 포함
+                  </option>
+                  <option value="dependency">
+                    상태 확인·의존 연결 · 계산 제외
+                  </option>
+                </select>
+              </label>
+              <p className="help">
+                DB 읽기·쓰기 화살표만으로 실행 순서나 순환 호출을 단정하지
+                않습니다. 실제 요청 전달인지 확인한 뒤 선택하세요.
+              </p>
+              <label className="field vertical">
+                <span>상세 설명</span>
+                <textarea
+                  rows={3}
+                  value={edge.data.note || ""}
+                  maxLength={4000}
+                  onFocus={p.checkpoint}
+                  onChange={(e) => edgeData({ note: e.target.value })}
+                />
+              </label>
+              <label className="field vertical">
+                <span>조건 · 비어 있으면 추가 조건 없음</span>
+                <input
+                  value={edge.data.condition || ""}
+                  maxLength={200}
+                  onFocus={p.checkpoint}
+                  onChange={(e) => edgeData({ condition: e.target.value })}
+                />
+              </label>
               <h3>호출 설정</h3>
               <NumberField
                 label="상위 요청당 호출 횟수"
                 value={edge.data.calls}
-                onChange={(calls) => edgeData({ calls: calls ?? 1 })}
+                onChange={(calls) =>
+                  edgeData({ calls: calls ?? 1, callsBasis: "assumption" })
+                }
                 max={10000}
                 checkpoint={p.checkpoint}
               />
+              <label className="field vertical">
+                <span>호출 횟수 근거</span>
+                <select
+                  value={edge.data.callsBasis || "assumption"}
+                  onChange={(e) => {
+                    p.checkpoint();
+                    edgeData({
+                      callsBasis: e.target.value as
+                        "unknown" | "assumption" | "measured",
+                    });
+                  }}
+                >
+                  <option value="unknown">확인 필요 · 1은 형식 기본값</option>
+                  <option value="assumption">설계 가정</option>
+                  <option value="measured">측정값</option>
+                </select>
+              </label>
               <label className="field vertical">
                 <span>호출 조건</span>
                 <select
@@ -616,21 +738,40 @@ export function Inspector(p: Props) {
                   <div className="two-cols">
                     <NumberField
                       label="너비 · px"
-                      min={n.type === "group" ? 200 : 156}
+                      min={n.type === "group" ? 200 : CARD_MIN.width}
                       max={10000}
                       value={n.width}
-                      onChange={(v) => nodeUpdate({ width: v || 156 })}
+                      onChange={(v) =>
+                        nodeUpdate({ width: v || CARD_MIN.width })
+                      }
                       checkpoint={p.checkpoint}
                     />
                     <NumberField
                       label="높이 · px"
-                      min={n.type === "group" ? 160 : 114}
+                      min={n.type === "group" ? 160 : CARD_MIN.height}
                       max={10000}
                       value={n.height}
-                      onChange={(v) => nodeUpdate({ height: v || 114 })}
+                      onChange={(v) =>
+                        nodeUpdate({ height: v || CARD_MIN.height })
+                      }
                       checkpoint={p.checkpoint}
                     />
                   </div>
+                  <p className="help">
+                    카드 최소 {CARD_MIN.width}×{CARD_MIN.height}px · 기술·이름
+                    두 줄·상태 영역을 확보합니다.
+                  </p>
+                  {n.type === "group" && (
+                    <button
+                      className="outline"
+                      onClick={() => {
+                        p.checkpoint();
+                        p.update((g) => fitGroups(g, n.id));
+                      }}
+                    >
+                      자식 범위에 그룹 맞추기
+                    </button>
+                  )}
                   {n.type === "component" && (
                     <label className="field vertical">
                       <span>소속 그룹</span>
@@ -877,6 +1018,23 @@ export function FlowResult({ graph, flow }: { graph: Graph; flow: Flow }) {
   return (
     <>
       <h3>요청 경로 계산</h3>
+      <div className="flow-stages">
+        <span>
+          HTTP 응답:{" "}
+          {graph.nodes.find((n) => n.id === flow.responseId)?.data.name ||
+            "완료 지점 확인 필요"}
+        </span>
+        <span>
+          최종 완료:{" "}
+          {graph.nodes.find((n) => n.id === flow.completionId)?.data.name ||
+            "완료 지점 확인 필요"}
+        </span>
+      </div>
+      <p className="help">
+        비동기 경계 뒤의 최종 전달은 HTTP 응답과 별도입니다. FCM 수락만으로 기기
+        화면 표시를 보장하지 않습니다. 상태 확인·의존 연결은 전달 부하·직렬
+        계산에서 제외합니다.
+      </p>
       <div className="key-values">
         <div>
           <span>동기 경로 기본 지연</span>
@@ -889,8 +1047,9 @@ export function FlowResult({ graph, flow }: { graph: Graph; flow: Flow }) {
       </div>
       {a.cyclic ? (
         <p className="notice">
-          순환 호출이 있어 자동 부하·지연 계산을 중단했습니다. 재시도 횟수를
-          별도 모델로 분리해 주세요.
+          전달 연결이 순환 모양이어서 자동 부하·지연 계산을 중단했습니다. 실제
+          순환 호출인지 DB 상태 확인용 역방향 연결인지 확인하고 연결 목적을
+          구분해 주세요.
         </p>
       ) : !a.hasEntry ? (
         <p className="notice">요청 시작점을 지정해 주세요.</p>

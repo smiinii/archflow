@@ -9,7 +9,10 @@ export type Metric = {
   bad: boolean;
 };
 export function capacity(p: Params) {
-  return p.meanMs !== null && p.meanMs > 0 && p.slots !== null
+  return p.basis !== "unknown" &&
+    p.meanMs !== null &&
+    p.meanMs > 0 &&
+    p.slots !== null
     ? (p.slots * p.replicas * 1000) / p.meanMs
     : null;
 }
@@ -25,6 +28,7 @@ export function analyze(g: Graph, flow: Flow) {
     (e) =>
       e.data.flowIds.includes(flow.id) &&
       e.data.kind !== "relation" &&
+      e.data.purpose !== "dependency" &&
       nodes.has(e.source) &&
       nodes.has(e.target),
   );
@@ -64,7 +68,7 @@ export function analyze(g: Graph, flow: Flow) {
   }
   const cyclic = order.length < reached.size;
   const loads = new Map<string, number | null>();
-  if (root) loads.set(root, flow.rps);
+  if (root) loads.set(root, flow.trafficBasis === "unknown" ? null : flow.rps);
   if (!cyclic)
     for (const id of order) {
       const incoming = edges.filter(
@@ -73,7 +77,13 @@ export function analyze(g: Graph, flow: Flow) {
       if (incoming.length)
         loads.set(
           id,
-          incoming.some((e) => loads.get(e.source) == null)
+          incoming.some(
+            (e) =>
+              loads.get(e.source) == null ||
+              e.data.callsBasis === "unknown" ||
+              (e.data.traffic === "cache-miss" &&
+                flow.cacheBasis === "unknown"),
+          )
             ? null
             : incoming.reduce(
                 (sum, e) =>
@@ -94,8 +104,18 @@ export function analyze(g: Graph, flow: Flow) {
   const costs = new Map<string, number | null>(),
     chains = new Map<string, string[]>();
   if (root) {
-    costs.set(root, 0);
-    chains.set(root, []);
+    const entry = nodes.get(root)!;
+    const p = entry.data.params;
+    const client = entry.data.catalogId === "client";
+    costs.set(
+      root,
+      client
+        ? 0
+        : p.basis === "unknown" || p.meanMs === null || p.networkMs === null
+          ? null
+          : p.meanMs + p.networkMs,
+    );
+    chains.set(root, client ? [] : [root]);
   }
   if (!cyclic)
     for (const id of order) {
@@ -105,6 +125,7 @@ export function analyze(g: Graph, flow: Flow) {
         (e) => e.target === id && e.data.kind === "sync" && sync.has(e.source),
       );
       if (
+        p.basis === "unknown" ||
         p.meanMs === null ||
         p.networkMs === null ||
         prev.some((e) => costs.get(e.source) == null)
@@ -133,8 +154,13 @@ export function analyze(g: Graph, flow: Flow) {
     : null;
   const latency = last ? costs.get(last)! : null;
   const availability =
+    !cyclic &&
     required.length &&
-    required.every((id) => nodes.get(id)!.data.params.availability !== null)
+    required.every(
+      (id) =>
+        nodes.get(id)!.data.params.basis !== "unknown" &&
+        nodes.get(id)!.data.params.availability !== null,
+    )
       ? required.reduce(
           (product, id) =>
             (product * nodes.get(id)!.data.params.availability!) / 100,
@@ -168,7 +194,7 @@ export function allMetrics(
         n.type === "group" || getItem(n.data.catalogId).structural;
       const demand = structural
         ? null
-        : (p.demand ??
+        : ((p.basis === "unknown" ? null : p.demand) ??
           (relevant.length && !relevant.some((r) => r.loads.get(n.id) == null)
             ? relevant.reduce((s, r) => s + r.loads.get(n.id)!, 0)
             : null));
@@ -177,6 +203,7 @@ export function allMetrics(
         ratio = demand !== null && c !== null ? demand / c : null,
         overload = ratio !== null && ratio >= 1,
         slow =
+          p.basis !== "unknown" &&
           demand !== null &&
           demand > 0 &&
           p.meanMs !== null &&

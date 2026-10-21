@@ -38,14 +38,24 @@ export const linkSchema = z.object({
   id,
   source: id,
   target: id,
-  sourceHandle: z.string().max(30).nullable().optional(),
-  targetHandle: z.string().max(30).nullable().optional(),
+  sourceHandle: z
+    .enum(["top-out", "right-out", "bottom-out", "left-out"])
+    .nullable()
+    .optional(),
+  targetHandle: z
+    .enum(["top-in", "right-in", "bottom-in", "left-in"])
+    .nullable()
+    .optional(),
   data: z.object({
     kind: z.enum(["sync", "async", "relation"]),
     label: z.string().max(100),
     flowIds: z.array(id).max(200),
     calls: num(10000),
     traffic: z.enum(["all", "cache-miss"]),
+    purpose: z.enum(["delivery", "dependency"]).optional(),
+    note: z.string().max(4000).optional(),
+    condition: z.string().max(200).optional(),
+    callsBasis: z.enum(["assumption", "measured", "unknown"]).optional(),
   }),
 });
 export const flowSchema = z.object({
@@ -56,6 +66,10 @@ export const flowSchema = z.object({
   entryId: id.nullable(),
   rps: num().nullable(),
   hitPercent: num(100),
+  trafficBasis: z.enum(["assumption", "measured", "unknown"]).optional(),
+  cacheBasis: z.enum(["assumption", "measured", "unknown"]).optional(),
+  responseId: id.nullable().optional(),
+  completionId: id.nullable().optional(),
   latencyTarget: num(600000).nullable(),
   availabilityTarget: num(100).nullable(),
   requiredIds: z.array(id).max(1000),
@@ -69,22 +83,21 @@ export const graphSchema = z
   })
   .superRefine((g, ctx) => {
     const nodes = new Map(g.nodes.map((n) => [n.id, n]));
-    if (
-      g.flows.some(
-        (f) => new Set(f.requiredIds).size !== f.requiredIds.length,
-      ) ||
-      g.edges.some(
-        (e) => new Set(e.data.flowIds).size !== e.data.flowIds.length,
-      )
-    )
-      ctx.addIssue({ code: "custom", message: "경로에 중복 ID가 있습니다." });
-    if (
-      nodes.size !== g.nodes.length ||
-      new Set(g.edges.map((e) => e.id)).size !== g.edges.length ||
-      new Set(g.flows.map((f) => f.id)).size !== g.flows.length
-    )
-      ctx.addIssue({ code: "custom", message: "중복 ID가 있습니다." });
-    for (const n of g.nodes)
+    const flows = new Set(g.flows.map((f) => f.id));
+    const issue = (path: (string | number)[], message: string) =>
+      ctx.addIssue({ code: "custom", path, message });
+    for (const key of ["nodes", "edges", "flows"] as const) {
+      const seen = new Set<string>();
+      g[key].forEach((item, i) => {
+        if (seen.has(item.id))
+          issue(
+            [key, i, "id"],
+            `중복 ID ${item.id}입니다. 서로 다른 ID를 지정해 주세요.`,
+          );
+        seen.add(item.id);
+      });
+    }
+    g.nodes.forEach((n, i) => {
       if (
         n.parentId &&
         (n.type === "group" ||
@@ -92,31 +105,41 @@ export const graphSchema = z
           nodes.get(n.parentId)?.type !== "group" ||
           nodes.get(n.parentId)?.parentId)
       )
-        ctx.addIssue({
-          code: "custom",
-          message:
-            "그룹 참조가 올바르지 않습니다. 그룹은 한 단계만 지원합니다.",
-        });
-    for (const e of g.edges)
-      if (
-        !nodes.has(e.source) ||
-        !nodes.has(e.target) ||
-        e.source === e.target ||
-        e.data.flowIds.some((id) => !g.flows.some((f) => f.id === id))
-      )
-        ctx.addIssue({
-          code: "custom",
-          message: "연결 참조가 올바르지 않습니다.",
-        });
-    for (const f of g.flows)
-      if (
-        (f.entryId && !nodes.has(f.entryId)) ||
-        f.requiredIds.some((id) => !nodes.has(id))
-      )
-        ctx.addIssue({
-          code: "custom",
-          message: "요청 경로 참조가 올바르지 않습니다.",
-        });
+        issue(
+          ["nodes", i, "parentId"],
+          "부모 그룹 ID를 확인해 주세요. 중첩 그룹은 지원하지 않습니다.",
+        );
+    });
+    g.edges.forEach((e, i) => {
+      for (const field of ["source", "target"] as const)
+        if (!nodes.has(e[field]))
+          issue(["edges", i, field], `${e[field]} 구성요소가 없습니다.`);
+      if (e.source === e.target)
+        issue(["edges", i, "target"], "자기 자신을 연결할 수 없습니다.");
+      const seen = new Set<string>();
+      e.data.flowIds.forEach((id, j) => {
+        if (!flows.has(id) || seen.has(id))
+          issue(
+            ["edges", i, "data", "flowIds", j],
+            `존재하는 요청 ID를 중복 없이 지정해 주세요: ${id}`,
+          );
+        seen.add(id);
+      });
+    });
+    g.flows.forEach((f, i) => {
+      for (const key of ["entryId", "responseId", "completionId"] as const)
+        if (f[key] && !nodes.has(f[key]!))
+          issue(["flows", i, key], `${f[key]} 구성요소가 없습니다.`);
+      const seen = new Set<string>();
+      f.requiredIds.forEach((id, j) => {
+        if (!nodes.has(id) || seen.has(id))
+          issue(
+            ["flows", i, "requiredIds", j],
+            `존재하는 구성요소를 중복 없이 지정해 주세요: ${id}`,
+          );
+        seen.add(id);
+      });
+    });
   });
 export type Params = z.infer<typeof paramsSchema>;
 export type Vertex = z.infer<typeof vertexSchema>;
@@ -212,6 +235,8 @@ export const createFlow = (name = "새 요청"): Flow => ({
   entryId: null,
   rps: null,
   hitPercent: 0,
+  trafficBasis: "unknown",
+  cacheBasis: "unknown",
   latencyTarget: null,
   availabilityTarget: null,
   requiredIds: [],
@@ -241,6 +266,12 @@ export function removeElements(
     flows: g.flows.map((f) => ({
       ...f,
       entryId: f.entryId && removed.has(f.entryId) ? null : f.entryId,
+      ...(f.responseId && removed.has(f.responseId)
+        ? { responseId: null }
+        : {}),
+      ...(f.completionId && removed.has(f.completionId)
+        ? { completionId: null }
+        : {}),
       requiredIds: f.requiredIds.filter((id) => !removed.has(id)),
     })),
   };
@@ -261,7 +292,10 @@ export function sortNodes(nodes: Vertex[]) {
   ];
 }
 export function parseGraph(text: string): Graph {
-  if (text.length > 5_000_000)
+  if (
+    text.length > 5_000_000 ||
+    new TextEncoder().encode(text).byteLength > 5_000_000
+  )
     throw new Error("JSON은 5MB 이하로 가져와 주세요.");
   return graphSchema.parse(JSON.parse(text));
 }

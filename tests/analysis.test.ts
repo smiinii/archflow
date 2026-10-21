@@ -96,3 +96,23 @@ describe("architecture analysis", () => {
     expect(allMetrics(g, "read").docker.capacity).toBeNull();
   });
 });
+
+describe("server entry points and unconfirmed multipliers", () => {
+  it("includes the entry server processing cost when the request begins at a server", () => {
+    const g = sampleGraph();
+    const f = g.flows[0];
+    f.entryId = "api";
+    f.requiredIds = ["api", "redis", "mysql"];
+    expect(analyze(g, f).latency).toBe(81);
+    expect(analyze(g, f).criticalPath).toEqual(["api", "redis", "mysql"]);
+  });
+  it("leaves downstream demand unknown until call and cache assumptions are confirmed", () => {
+    const g = sampleGraph();
+    g.edges[1].data.callsBasis = "unknown";
+    expect(analyze(g, g.flows[0]).loads.get("api")).toBeNull();
+    g.edges[1].data.callsBasis = "assumption";
+    g.flows[0].cacheBasis = "unknown";
+    expect(analyze(g, g.flows[0]).loads.get("api")).toBe(480);
+    expect(analyze(g, g.flows[0]).loads.get("mysql")).toBeNull();
+  });
+});

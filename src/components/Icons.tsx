@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Box,
   Monitor,
@@ -11,8 +11,17 @@ import {
   Globe,
 } from "lucide-react";
 import { getItem, iconSource } from "../lib/catalog";
-export function TechIcon({ id, size = 26 }: { id: string; size?: number }) {
+export function TechIcon({
+  id,
+  size = 26,
+  onUnavailable,
+}: {
+  id: string;
+  size?: number;
+  onUnavailable?: () => void;
+}) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [id]);
   const item = getItem(id);
   const src = iconSource(id);
   if (src && !failed)
@@ -24,7 +33,10 @@ export function TechIcon({ id, size = 26 }: { id: string; size?: number }) {
         height={size}
         alt=""
         loading="lazy"
-        onError={() => setFailed(true)}
+        onError={() => {
+          setFailed(true);
+          onUnavailable?.();
+        }}
       />
     );
   const icons: Record<string, typeof Box> = {
@@ -38,5 +50,11 @@ export function TechIcon({ id, size = 26 }: { id: string; size?: number }) {
     globe: Globe,
   };
   const Icon = icons[item.icon || ""] || Box;
-  return <Icon size={size} aria-hidden="true" />;
+  return (
+    <Icon size={size} aria-hidden="true">
+      <title>
+        {failed ? `${item.title} 아이콘을 불러오지 못했습니다.` : item.title}
+      </title>
+    </Icon>
+  );
 }

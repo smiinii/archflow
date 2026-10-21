@@ -12,6 +12,30 @@ export type CatalogItem = {
   structural?: boolean;
 };
 const basic: Record<string, Omit<CatalogItem, "id">> = {
+  "tech-firebase": {
+    title: "Firebase",
+    name: "Firebase",
+    provider: "backend",
+    category: "플랫폼",
+    asset: "firebase",
+    keywords: "파이어베이스",
+  },
+  "tech-fcm": {
+    title: "Firebase Cloud Messaging",
+    name: "푸시 알림",
+    provider: "backend",
+    category: "메시징",
+    asset: "fcm",
+    keywords: "FCM Firebase 푸시 알림 파이어베이스",
+  },
+  "tech-slack": {
+    title: "Slack",
+    name: "운영 알림",
+    provider: "backend",
+    category: "운영",
+    asset: "slack",
+    keywords: "슬랙 알림 웹훅",
+  },
   client: {
     title: "Browser",
     name: "사용자",
@@ -102,3 +126,32 @@ export const categoryName = (s: string) =>
     Containers: "컨테이너",
     ApplicationIntegration: "애플리케이션 통합",
   })[s] || s;
+
+export const catalogMappingText = (ids?: string[]) =>
+  catalog
+    .filter((c) => !ids || ids.includes(c.id))
+    .map(
+      (c) => `${c.id} = ${c.title}${c.structural ? " (구성 관계 전용)" : ""}`,
+    )
+    .join("\n");
+
+export const promptCatalogIds = (used: string[] = []) =>
+  catalog
+    .filter(
+      (c) =>
+        c.provider !== "aws" ||
+        [
+          "aws-compute-lambda",
+          "aws-compute-ec2",
+          "aws-compute-ec2autoscaling",
+          "aws-networkingcontentdelivery-cloudfront",
+          "aws-networkingcontentdelivery-elasticloadbalancingapplicationloadbalancer",
+          "aws-database-rds",
+          "aws-database-dynamodb",
+          "aws-storage-simplestorageservice",
+          "aws-applicationintegration-simplequeueservice",
+          "aws-applicationintegration-simplenotificationservice",
+          ...used,
+        ].includes(c.id),
+    )
+    .map((c) => c.id);
