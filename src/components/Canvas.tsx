@@ -437,8 +437,11 @@ const fitOptions = {
   maxZoom: 1,
 } as const;
 export function Canvas(props: Props) {
+  // Overview proxies reuse group IDs; don't carry handle bounds across node-type changes.
   return (
-    <ReactFlowProvider key={props.graph === undefined ? "empty" : "canvas"}>
+    <ReactFlowProvider
+      key={props.graph === undefined ? "empty" : props.readingMode || "canvas"}
+    >
       <CanvasInner {...props} />
     </ReactFlowProvider>
   );
