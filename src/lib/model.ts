@@ -1,0 +1,267 @@
+import { z } from "zod";
+
+const id = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[a-zA-Z0-9_-]+$/);
+const num = (max = 1e9) => z.number().finite().min(0).max(max);
+const point = z.object({
+  x: z.number().finite().min(-100000).max(100000),
+  y: z.number().finite().min(-100000).max(100000),
+});
+export const paramsSchema = z.object({
+  meanMs: num(600000).nullable(),
+  slots: z.number().int().min(1).max(100000).nullable(),
+  replicas: z.number().int().min(1).max(10000),
+  availability: num(100).nullable(),
+  networkMs: num(600000).nullable(),
+  budgetMs: num(600000).nullable(),
+  demand: num().nullable(),
+  basis: z.enum(["assumption", "measured", "unknown"]),
+});
+export const vertexSchema = z.object({
+  id,
+  type: z.enum(["component", "group"]),
+  position: point,
+  width: z.number().min(140).max(10000),
+  height: z.number().min(100).max(10000),
+  parentId: id.optional(),
+  data: z.object({
+    catalogId: z.string().max(180),
+    name: z.string().min(1).max(80),
+    note: z.string().max(4000),
+    params: paramsSchema,
+  }),
+});
+export const linkSchema = z.object({
+  id,
+  source: id,
+  target: id,
+  sourceHandle: z.string().max(30).nullable().optional(),
+  targetHandle: z.string().max(30).nullable().optional(),
+  data: z.object({
+    kind: z.enum(["sync", "async", "relation"]),
+    label: z.string().max(100),
+    flowIds: z.array(id).max(200),
+    calls: num(10000),
+    traffic: z.enum(["all", "cache-miss"]),
+  }),
+});
+export const flowSchema = z.object({
+  id,
+  name: z.string().min(1).max(80),
+  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "EVENT"]),
+  route: z.string().max(200),
+  entryId: id.nullable(),
+  rps: num().nullable(),
+  hitPercent: num(100),
+  latencyTarget: num(600000).nullable(),
+  availabilityTarget: num(100).nullable(),
+  requiredIds: z.array(id).max(1000),
+});
+export const graphSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    nodes: z.array(vertexSchema).max(1000),
+    edges: z.array(linkSchema).max(4000),
+    flows: z.array(flowSchema).max(200),
+  })
+  .superRefine((g, ctx) => {
+    const nodes = new Map(g.nodes.map((n) => [n.id, n]));
+    if (
+      g.flows.some(
+        (f) => new Set(f.requiredIds).size !== f.requiredIds.length,
+      ) ||
+      g.edges.some(
+        (e) => new Set(e.data.flowIds).size !== e.data.flowIds.length,
+      )
+    )
+      ctx.addIssue({ code: "custom", message: "경로에 중복 ID가 있습니다." });
+    if (
+      nodes.size !== g.nodes.length ||
+      new Set(g.edges.map((e) => e.id)).size !== g.edges.length ||
+      new Set(g.flows.map((f) => f.id)).size !== g.flows.length
+    )
+      ctx.addIssue({ code: "custom", message: "중복 ID가 있습니다." });
+    for (const n of g.nodes)
+      if (
+        n.parentId &&
+        (n.type === "group" ||
+          n.parentId === n.id ||
+          nodes.get(n.parentId)?.type !== "group" ||
+          nodes.get(n.parentId)?.parentId)
+      )
+        ctx.addIssue({
+          code: "custom",
+          message:
+            "그룹 참조가 올바르지 않습니다. 그룹은 한 단계만 지원합니다.",
+        });
+    for (const e of g.edges)
+      if (
+        !nodes.has(e.source) ||
+        !nodes.has(e.target) ||
+        e.source === e.target ||
+        e.data.flowIds.some((id) => !g.flows.some((f) => f.id === id))
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "연결 참조가 올바르지 않습니다.",
+        });
+    for (const f of g.flows)
+      if (
+        (f.entryId && !nodes.has(f.entryId)) ||
+        f.requiredIds.some((id) => !nodes.has(id))
+      )
+        ctx.addIssue({
+          code: "custom",
+          message: "요청 경로 참조가 올바르지 않습니다.",
+        });
+  });
+export type Params = z.infer<typeof paramsSchema>;
+export type Vertex = z.infer<typeof vertexSchema>;
+export type Link = z.infer<typeof linkSchema>;
+export type Flow = z.infer<typeof flowSchema>;
+export type Graph = z.infer<typeof graphSchema>;
+const versionSchema = z.object({
+  id,
+  name: z.string().max(100),
+  createdAt: z.string(),
+  graph: graphSchema,
+  source: z.enum(["manual", "ai"]),
+});
+export const projectSchema = z.object({
+  id,
+  name: z.string().min(1).max(80),
+  folderId: id.nullable(),
+  graph: graphSchema,
+  interview: z.string().max(100000),
+  versions: z.array(versionSchema).max(30),
+});
+export const workspaceSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    currentProjectId: id,
+    folders: z
+      .array(
+        z.object({
+          id,
+          name: z.string().min(1).max(80),
+          parentId: id.nullable(),
+        }),
+      )
+      .max(200),
+    projects: z.array(projectSchema).min(1).max(100),
+    preferences: z.object({ motion: z.boolean(), snap: z.boolean() }),
+  })
+  .superRefine((w, ctx) => {
+    const ps = new Set(w.projects.map((p) => p.id)),
+      fs = new Map(w.folders.map((f) => [f.id, f]));
+    if (
+      ps.size !== w.projects.length ||
+      fs.size !== w.folders.length ||
+      !ps.has(w.currentProjectId)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "프로젝트 참조가 잘못되었습니다.",
+      });
+    for (const p of w.projects)
+      if (p.folderId && !fs.has(p.folderId))
+        ctx.addIssue({ code: "custom", message: "저장 폴더가 없습니다." });
+    for (const f of w.folders) {
+      const seen = new Set([f.id]);
+      let parent = f.parentId;
+      while (parent) {
+        if (seen.has(parent) || !fs.has(parent)) {
+          ctx.addIssue({
+            code: "custom",
+            message: "폴더 순환 또는 잘못된 상위 폴더입니다.",
+          });
+          break;
+        }
+        seen.add(parent);
+        parent = fs.get(parent)!.parentId;
+      }
+    }
+  });
+export type Project = z.infer<typeof projectSchema>;
+export type Workspace = z.infer<typeof workspaceSchema>;
+export const uid = () => crypto.randomUUID();
+export const defaultParams = (): Params => ({
+  meanMs: null,
+  slots: null,
+  replicas: 1,
+  availability: null,
+  networkMs: null,
+  budgetMs: null,
+  demand: null,
+  basis: "unknown",
+});
+export const emptyGraph = (): Graph => ({
+  schemaVersion: 1,
+  nodes: [],
+  edges: [],
+  flows: [],
+});
+export const createFlow = (name = "새 요청"): Flow => ({
+  id: uid(),
+  name,
+  method: "GET",
+  route: "/",
+  entryId: null,
+  rps: null,
+  hitPercent: 0,
+  latencyTarget: null,
+  availabilityTarget: null,
+  requiredIds: [],
+});
+export function removeElements(
+  g: Graph,
+  nodeIds: string[],
+  edgeIds: string[],
+): Graph {
+  const removed = new Set(nodeIds);
+  const nodes = g.nodes
+    .filter((n) => !removed.has(n.id))
+    .map((n) =>
+      n.parentId && removed.has(n.parentId)
+        ? { ...n, parentId: undefined, position: absolutePosition(n, g.nodes) }
+        : n,
+    );
+  return {
+    ...g,
+    nodes,
+    edges: g.edges.filter(
+      (e) =>
+        !removed.has(e.source) &&
+        !removed.has(e.target) &&
+        !edgeIds.includes(e.id),
+    ),
+    flows: g.flows.map((f) => ({
+      ...f,
+      entryId: f.entryId && removed.has(f.entryId) ? null : f.entryId,
+      requiredIds: f.requiredIds.filter((id) => !removed.has(id)),
+    })),
+  };
+}
+export function absolutePosition(n: Vertex, nodes: Vertex[]) {
+  const parent = nodes.find((p) => p.id === n.parentId);
+  return parent
+    ? {
+        x: n.position.x + parent.position.x,
+        y: n.position.y + parent.position.y,
+      }
+    : n.position;
+}
+export function sortNodes(nodes: Vertex[]) {
+  return [
+    ...nodes.filter((n) => n.type === "group"),
+    ...nodes.filter((n) => n.type !== "group"),
+  ];
+}
+export function parseGraph(text: string): Graph {
+  if (text.length > 5_000_000)
+    throw new Error("JSON은 5MB 이하로 가져와 주세요.");
+  return graphSchema.parse(JSON.parse(text));
+}

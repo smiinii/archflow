@@ -1,1 +1,87 @@
-# archflow
+# Archflow
+
+백엔드의 **전체 아키텍처와 API별 흐름을 그리고 이해하는** 웹 편집기입니다. 밝은 캔버스에서 구성요소를 연결하고, 설계 가정과 목표를 비교합니다.
+
+## 실행
+
+Node.js 24 LTS를 권장합니다. 22.12 이상이 필요합니다.
+
+```bash
+npm ci
+npm run dev
+```
+
+[http://localhost:5173](http://localhost:5173)에서 실행됩니다. Supabase 설정이 없으면 IndexedDB에 저장하는 **로컬 모드**로 사용할 수 있습니다.
+
+## 사용할 수 있는 기능
+
+- 이해하기 / 설계하기 / 개선하기, 전체 구조 / API별 흐름
+- 프로젝트·폴더 생성, 프로젝트 이름과 소속 폴더 변경
+- 기술·역할 이름을 분리한 구성요소, 복제, 사용자 정의 요소
+- 마우스 이동·가로/세로/모서리 크기 조절, 그룹·다중 선택·해제
+- 중심·변·대칭·간격 안내선과 스냅, 자석 토글·Alt 임시 해제
+- Delete·Backspace 삭제, 관련 연결·API 참조 정리, 실행 취소·다시 실행
+- 동기 실선 / 비동기 점선 / 배포·구성 관계, 1:N·N:M 연결
+- 연결별 API 포함 여부, 호출 횟수와 캐시 미스 조건
+- 요청 점 애니메이션과 모션 토글, 시스템의 움직임 줄이기 설정 존중
+- AWS Labs v23.1 아이콘 872종, 백엔드·인프라 75종, LMS·기본 라이브러리 검색
+- 요청 RPS·캐시 적중률·목표, 평균 처리 시간·동시 처리 수·대수·가용성·연결 지연
+- 빨간색 문제 후보와 원인·비교 수치·개선 가정·검증 방법
+- 외부 AI 인터뷰 프롬프트, 결과 메모, JSON 검증·미리보기 후 **새 프로젝트로** 가져오기
+- 프로젝트별 버전 30개, JSON 내보내기/가져오기·전체 작업공간 백업
+- 로컬 자동 저장, Supabase 이메일 로그인·사용자별 클라우드 저장·충돌 병합
+
+## Supabase · Vercel
+
+실행 순서는 [배포 안내](docs/deployment.md)에 있습니다. 서비스 운영자의 AI API 키는 필요하지 않습니다.
+
+1. Supabase 프로젝트에서 [마이그레이션](supabase/migrations/202610210001_workspaces.sql)을 실행합니다.
+2. `.env.example`을 `.env.local`로 복사하고 프로젝트 URL과 **publishable key**를 설정합니다.
+3. Vercel에서 이 저장소를 가져오고 동일한 두 환경 변수를 등록합니다.
+4. Supabase Auth의 Site URL과 Redirect URL을 배포 주소로 설정합니다.
+
+```dotenv
+VITE_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
+```
+
+브라우저용 공개 키만 사용합니다. `service_role`, 비밀 키, DB 비밀번호는 프런트엔드나 Git에 넣지 않습니다. 공개 코드 저장소와 사용자 설계의 공개 여부는 별개입니다.
+
+## 계산 범위
+
+입력한 값은 측정값 또는 설계 가정입니다. 빈 값은 **확인 필요**로 남깁니다.
+
+- 용량 = 동시 처리 수 × 대수 × 1,000 ÷ 평균 처리 시간(ms). 실제 CPU 사용률이나 성능 보장이 아닙니다.
+- 부하는 API 연결의 호출 횟수와 캐시 미스 비율을 전달합니다. 전체 보기는 여러 API의 요구 부하 합입니다. 앞단 포화로 실제 유입이 줄어드는 효과는 반영하지 않습니다.
+- 지연은 선택한 필수 요소에 도달하는 **가장 긴 동기 의존 경로**입니다. 병렬 분기의 시간을 모두 더하지 않습니다. 파일 전송·큐 대기·재시도·p99는 예측하지 않습니다.
+- 가용성은 응답에 필수인 동기 도달 요소의 **독립 고장 가정**에 따른 곱입니다. 복제본·우회·공통 장애를 자동 추정하지 않습니다. 비동기 작업의 최종 완료 신뢰성은 별도입니다.
+- 순환 호출은 자동 부하·지연 계산을 중단합니다. 순환 없는 그래프와 명시적인 호출 횟수로 모델링해 주세요.
+
+## 개발·검증
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run check
+npm run format
+```
+
+`docs/ci.example.yml`을 `.github/workflows/ci.yml`로 저장하면 GitHub Actions에서 타입 검사, Vitest와 프로덕션 빌드를 실행할 수 있습니다. CI 예시는 GitHub의 workflow 쓰기 권한이 있는 계정에서 활성화합니다. SQL 권한·RLS·낙관적 잠금은 PGlite PostgreSQL로 검증합니다. 실제 Supabase 서비스의 이메일 발송·리디렉션과 Vercel 배포 후 확인 항목은 별도입니다.
+
+## 구조
+
+- `src/components/Canvas.tsx`: React Flow 캔버스·그룹·연결·모션
+- `src/components/Inspector.tsx`: 속성·진단·요청 설정
+- `src/lib/analysis.ts`: 부하·동기 경로 지연·직렬 가용성
+- `src/lib/model.ts`: 저장·가져오기 스키마와 참조 무결성
+- `src/lib/useWorkspace.ts`: 계정별 IndexedDB·Supabase 동기화
+- `supabase/migrations/`: DB와 RLS·revision 비교 저장 함수
+- `docs/archflow-requirements.md`: 합의된 요구사항과 구현 상태
+- `docs/graph-format.md`: AI·외부 도구용 JSON 형식
+
+현재는 한 사용자 작업공간을 JSONB 스냅샷으로 원자적으로 저장합니다. 동시 편집 시 조용히 덮어쓰지 않고 클라우드 사본을 합칩니다. 실시간 공동 편집, 외부 AI의 MCP 직접 제어, 실제 운영 인프라 수집은 이번 버전에 포함되지 않습니다. 프롬프트와 JSON 교환을 통해 사용자의 AI 도구와 연결합니다.
+
+프로젝트 수 100개, 폴더 200개, 그래프당 요소 1,000개·연결 4,000개·API 200개, 작업공간 20MB 제한이 있습니다. 대규모 사용 시 프로젝트별 문서 테이블로 분리할 수 있습니다.
+
+아이콘·라이브러리 출처는 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)를 참조해 주세요.
