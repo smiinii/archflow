@@ -1743,10 +1743,10 @@ details p {
   right: -4px;
 }
 
-/* Workspace panels: independent navigation sections and a wide bottom inspector. */
+/* A full-height architecture canvas followed by details in the page scroll. */
 .app-shell .workspace {
   grid-template-columns: 244px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) clamp(220px, 34dvh, 360px);
+  grid-template-rows: minmax(0, 1fr);
   display: grid;
   overflow: hidden;
   position: relative;
@@ -1754,15 +1754,9 @@ details p {
 .app-shell .workspace.sidebar-collapsed {
   grid-template-columns: 0 minmax(0, 1fr);
 }
-.app-shell .workspace.inspector-expanded {
-  grid-template-rows: minmax(0, 1fr) min(58dvh, 560px);
-}
-.app-shell .workspace.inspector-collapsed {
-  grid-template-rows: minmax(0, 1fr) 48px;
-}
 .app-shell .sidebar {
   grid-column: 1;
-  grid-row: 1 / 3;
+  grid-row: 1;
   display: flex;
   gap: 12px;
   padding: 12px;
@@ -1820,17 +1814,39 @@ details p {
 .flow-section .layer-row {
   flex-shrink: 0;
 }
-.app-shell .main-work {
+.work-scroll {
   grid-column: 2;
   grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+}
+.app-shell .main-work {
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
 }
+.details-section {
+  scroll-margin-top: 0;
+}
+.details-jump {
+  margin-left: auto;
+  font-size: 11px;
+  color: #83739c;
+  padding: 2px 6px;
+}
+.details-jump + .issue-text {
+  margin-left: 12px;
+}
+
 .app-shell .canvas-wrap {
   min-height: 0;
 }
 .app-shell .inspector {
-  grid-column: 2;
-  grid-row: 2;
   display: flex;
   position: static;
   width: auto;
@@ -1844,6 +1860,7 @@ details p {
   height: 48px;
   padding: 8px 16px;
   align-items: center;
+  background: white;
 }
 .inspector-selection {
   margin-left: auto;
@@ -1860,7 +1877,9 @@ details p {
   align-items: start;
   gap: 20px 24px;
   padding: 18px 22px 24px;
-  overscroll-behavior: contain;
+  overflow: visible;
+  flex: none;
+  overscroll-behavior: auto;
 }
 .app-shell .inspector-scroll[hidden] {
   display: none;
@@ -2055,10 +2074,7 @@ details p {
 @media (max-width: 580px) {
   .app-shell .workspace {
     grid-template-columns: 0 minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) 240px;
-  }
-  .app-shell .workspace.inspector-expanded {
-    grid-template-rows: minmax(0, 1fr) min(62dvh, 520px);
+    grid-template-rows: minmax(0, 1fr);
   }
   .app-shell .sidebar {
     position: absolute;
@@ -2152,4 +2168,19 @@ details p {
 }
 .inspector-empty p {
   margin: 8px 0 12px;
+}
+
+.trafficbar .sidebar-reopen {
+  padding: 6px;
+  flex-shrink: 0;
+}
+@media (max-width: 580px) {
+  .back-to-canvas {
+    display: none;
+  }
+  .details-jump {
+    font-size: 9px;
+    gap: 3px;
+    padding: 2px;
+  }
 }

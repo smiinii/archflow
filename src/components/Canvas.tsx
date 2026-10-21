@@ -263,6 +263,10 @@ function FlowEdge(props: EdgeProps) {
 }
 const nodeTypes = { component: ComponentNode, group: GroupNode },
   edgeTypes = { flow: FlowEdge };
+const fitOptions = {
+  padding: { top: "44px", right: "40px", bottom: "88px", left: "40px" },
+  maxZoom: 1,
+} as const;
 export function Canvas(props: Props) {
   return (
     <ReactFlowProvider key={props.graph === undefined ? "empty" : "canvas"}>
@@ -404,7 +408,7 @@ function CanvasInner(p: Props) {
           edgeTypes={edgeTypes}
           onInit={() => {
             if (lastFit.current !== p.fitKey) {
-              api.fitView({ padding: 0.18, maxZoom: 1 });
+              api.fitView(fitOptions);
               lastFit.current = p.fitKey;
             }
           }}
@@ -437,7 +441,10 @@ function CanvasInner(p: Props) {
           }
           onMoveEnd={() => setGuides([])}
           fitView
-          fitViewOptions={{ padding: 0.18, maxZoom: 1 }}
+          fitViewOptions={fitOptions}
+          zoomOnScroll={false}
+          preventScrolling={false}
+          zoomActivationKeyCode="Control"
           minZoom={0.15}
           maxZoom={2}
           deleteKeyCode={null}
@@ -459,7 +466,7 @@ function CanvasInner(p: Props) {
           }}
         >
           <Background color="#d9dce4" gap={20} size={1} />
-          <Controls showInteractive={false} />
+          <Controls showInteractive={false} fitViewOptions={fitOptions} />
           <MiniMap
             className="minimap"
             pannable
@@ -577,7 +584,7 @@ function CanvasInner(p: Props) {
           </button>
           <button
             aria-label="전체 맞춤"
-            onClick={() => api.fitView({ padding: 0.18, maxZoom: 1 })}
+            onClick={() => api.fitView(fitOptions)}
           >
             <Maximize size={17} />
           </button>

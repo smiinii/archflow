@@ -20,6 +20,7 @@ import {
   PanelBottom,
   Settings2,
   Link2,
+  ArrowDown,
   LogIn,
   LogOut,
   Cloud,
@@ -86,10 +87,23 @@ export default function App() {
     [folderId, setFolderId] = useState<string | null>(null),
     [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth > 580),
     [inspectorOpen, setInspectorOpen] = useState(false),
-    [inspectorExpanded, setInspectorExpanded] = useState(false),
     [connecting, setConnecting] = useState(false),
     [message, setMessage] = useState(""),
     [historyVersion, bumpHistory] = useState(0);
+  const canvasSection = useRef<HTMLElement>(null);
+  const detailsSection = useRef<HTMLDivElement>(null);
+  function scrollToSection(element: HTMLElement | null) {
+    element?.scrollIntoView({
+      block: "start",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "instant"
+        : "smooth",
+    });
+  }
+  function showDetails() {
+    setInspectorOpen(true);
+    requestAnimationFrame(() => scrollToSection(detailsSection.current));
+  }
   const history = useRef<Record<string, { past: Graph[]; future: Graph[] }>>(
     {},
   );
@@ -271,7 +285,7 @@ export default function App() {
     kind: Link["data"]["kind"] = connectionKind,
   ) {
     setConnecting(true);
-    setInspectorOpen(false);
+    requestAnimationFrame(() => scrollToSection(canvasSection.current));
     setSource(id);
     setConnectionKind(kind);
     setTool("select");
@@ -530,17 +544,6 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        {!sidebarOpen && (
-          <button
-            className="sidebar-reopen"
-            aria-label="왼쪽 사이드바 펼치기"
-            aria-expanded={false}
-            aria-controls="project-sidebar"
-            onClick={() => setSidebarOpen(true)}
-          >
-            <PanelLeft size={19} />
-          </button>
-        )}
         <div className="brand">
           <Workflow size={20} />
           <span>archflow</span>
@@ -624,7 +627,7 @@ export default function App() {
           <button
             aria-label="속성 패널"
             aria-expanded={inspectorOpen}
-            onClick={() => setInspectorOpen(!inspectorOpen)}
+            onClick={showDetails}
           >
             <PanelBottom size={17} />
           </button>
@@ -655,9 +658,7 @@ export default function App() {
           )}
         </div>
       )}
-      <div
-        className={`workspace ${sidebarOpen ? "" : "sidebar-collapsed"} ${inspectorOpen ? "" : "inspector-collapsed"} ${inspectorExpanded ? "inspector-expanded" : ""}`}
-      >
+      <div className={`workspace ${sidebarOpen ? "" : "sidebar-collapsed"}`}>
         <aside
           className="sidebar"
           id="project-sidebar"
@@ -794,210 +795,235 @@ export default function App() {
             ))}
           </section>
         </aside>
-        <main className="main-work">
-          <div className="trafficbar">
-            <div className="view-toggle">
-              <button aria-pressed={!validFlow} onClick={() => setFlowId(null)}>
-                전체 구조
-              </button>
+        <div className="work-scroll" aria-label="아키텍처와 상세 정보">
+          <main className="main-work" ref={canvasSection}>
+            <div className="trafficbar">
+              {!sidebarOpen && (
+                <button
+                  className="sidebar-reopen"
+                  aria-label="왼쪽 사이드바 펼치기"
+                  aria-expanded={false}
+                  aria-controls="project-sidebar"
+                  onClick={() => setSidebarOpen(true)}
+                >
+                  <PanelLeft size={19} />
+                </button>
+              )}
+
+              <div className="view-toggle">
+                <button
+                  aria-pressed={!validFlow}
+                  onClick={() => setFlowId(null)}
+                >
+                  전체 구조
+                </button>
+                <button
+                  aria-pressed={!!validFlow}
+                  onClick={() => {
+                    if (g.flows[0]) setFlowId(g.flows[0].id);
+                    else setDialog("new-flow");
+                  }}
+                >
+                  API 흐름
+                </button>
+              </div>
               <button
-                aria-pressed={!!validFlow}
-                onClick={() => {
-                  if (g.flows[0]) setFlowId(g.flows[0].id);
-                  else setDialog("new-flow");
-                }}
+                className="outline connect-launch"
+                aria-pressed={connecting}
+                onClick={() =>
+                  connecting
+                    ? stopConnect()
+                    : startConnect(
+                        g.nodes.find(
+                          (n) =>
+                            selection.nodes.includes(n.id) &&
+                            n.type === "component",
+                        )?.id || null,
+                      )
+                }
               >
-                API 흐름
+                <Link2 size={16} />
+                연결하기
               </button>
-            </div>
-            <button
-              className="outline connect-launch"
-              aria-pressed={connecting}
-              onClick={() =>
-                connecting
-                  ? stopConnect()
-                  : startConnect(
-                      g.nodes.find(
-                        (n) =>
-                          selection.nodes.includes(n.id) &&
-                          n.type === "component",
-                      )?.id || null,
-                    )
-              }
-            >
-              <Link2 size={16} />
-              연결하기
-            </button>
-            {activeFlow ? (
-              <label className="traffic-rps">
-                유입
+              {activeFlow ? (
+                <label className="traffic-rps">
+                  유입
+                  <input
+                    type="number"
+                    aria-label="요청 유입 RPS"
+                    value={activeFlow.rps ?? ""}
+                    placeholder="미지정"
+                    min={0}
+                    max={1e9}
+                    onFocus={checkpoint}
+                    onChange={(e) =>
+                      updateGraph((g) => ({
+                        ...g,
+                        flows: g.flows.map((f) =>
+                          f.id === activeFlow.id
+                            ? {
+                                ...f,
+                                rps:
+                                  e.target.value === ""
+                                    ? null
+                                    : Math.min(
+                                        1e9,
+                                        Math.max(0, Number(e.target.value)),
+                                      ),
+                              }
+                            : f,
+                        ),
+                      }))
+                    }
+                  />
+                  RPS
+                </label>
+              ) : (
+                <span className="traffic-summary">
+                  {g.nodes.filter((n) => n.type === "component").length}개 요소
+                  · {g.edges.length}개 연결
+                </span>
+              )}
+              <label className="motion-switch">
                 <input
-                  type="number"
-                  aria-label="요청 유입 RPS"
-                  value={activeFlow.rps ?? ""}
-                  placeholder="미지정"
-                  min={0}
-                  max={1e9}
-                  onFocus={checkpoint}
+                  type="checkbox"
+                  role="switch"
+                  aria-label="요청 흐름 모션"
+                  checked={w.preferences.motion}
                   onChange={(e) =>
-                    updateGraph((g) => ({
-                      ...g,
-                      flows: g.flows.map((f) =>
-                        f.id === activeFlow.id
-                          ? {
-                              ...f,
-                              rps:
-                                e.target.value === ""
-                                  ? null
-                                  : Math.min(
-                                      1e9,
-                                      Math.max(0, Number(e.target.value)),
-                                    ),
-                            }
-                          : f,
-                      ),
+                    storage.change((w) => ({
+                      ...w,
+                      preferences: {
+                        ...w.preferences,
+                        motion: e.target.checked,
+                      },
                     }))
                   }
                 />
-                RPS
+                <span>흐름 모션</span>
               </label>
-            ) : (
-              <span className="traffic-summary">
-                {g.nodes.filter((n) => n.type === "component").length}개 요소 ·{" "}
-                {g.edges.length}개 연결
-              </span>
-            )}
-            <label className="motion-switch">
-              <input
-                type="checkbox"
-                role="switch"
-                aria-label="요청 흐름 모션"
-                checked={w.preferences.motion}
-                onChange={(e) =>
-                  storage.change((w) => ({
-                    ...w,
-                    preferences: { ...w.preferences, motion: e.target.checked },
-                  }))
-                }
-              />
-              <span>흐름 모션</span>
-            </label>
-          </div>
-          {connecting && (
-            <ConnectionBuilder
-              graph={g}
-              source={source}
-              kind={connectionKind}
-              setSource={(id) => startConnect(id)}
-              setKind={setConnectionKind}
-              connect={connect}
-              close={stopConnect}
-            />
-          )}
-          <Canvas
-            key={selectedProject.id}
-            graph={g}
-            flowId={validFlow}
-            motion={w.preferences.motion}
-            snap={w.preferences.snap}
-            selection={selection}
-            source={source}
-            tool={tool}
-            change={updateGraph}
-            checkpoint={checkpoint}
-            select={setSelection}
-            nodeClick={nodeClick}
-            edgeClick={(id) => {
-              setSelection({ nodes: [], edges: [id] });
-              setInspectorOpen(true);
-              stopConnect();
-            }}
-            startConnect={(id) => startConnect(id)}
-            connect={connect}
-            setTool={setTool}
-            toggleSnap={() =>
-              storage.change((w) => ({
-                ...w,
-                preferences: { ...w.preferences, snap: !w.preferences.snap },
-              }))
-            }
-            add={() => setDialog("library")}
-            group={groupSelection}
-            ungroup={ungroup}
-            remove={remove}
-            undo={undo}
-            redo={redo}
-            canUndo={!!historyState?.past.length}
-            canRedo={!!historyState?.future.length}
-            fitKey={0}
-          />
-          <div className="findings">
-            <div>
-              <strong>{validFlow ? "설계 확인" : "전체 연결 관계"}</strong>
-              <span className={problems ? "issue-text" : ""}>
-                {problems
-                  ? `문제 후보 ${problems}곳`
-                  : validFlow
-                    ? "설정한 수치를 확인하세요"
-                    : "모든 API의 요구 부하를 합산합니다"}
-              </span>
             </div>
-            {flowResult ? (
-              <div className="findings-values">
-                <span>
-                  기본 지연 <b>{fmt(flowResult.latency)} ms</b>
-                </span>
-                <span>
-                  직렬 가용성 <b>{percent(flowResult.availability)}</b>
-                </span>
-                <span>{flowResult.required.length}개 항</span>
-              </div>
-            ) : (
-              <div className="legend">
-                <span>
-                  <i className="line-swatch sync" />
-                  동기 · 실선
-                </span>
-                <span>
-                  <i className="line-swatch async" />
-                  비동기 · 점선
-                </span>
-                <span>
-                  <i className="line-swatch relation" />
-                  구성 관계
-                </span>
-              </div>
+            {connecting && (
+              <ConnectionBuilder
+                graph={g}
+                source={source}
+                kind={connectionKind}
+                setSource={(id) => startConnect(id)}
+                setKind={setConnectionKind}
+                connect={connect}
+                close={stopConnect}
+              />
             )}
+            <Canvas
+              key={selectedProject.id}
+              graph={g}
+              flowId={validFlow}
+              motion={w.preferences.motion}
+              snap={w.preferences.snap}
+              selection={selection}
+              source={source}
+              tool={tool}
+              change={updateGraph}
+              checkpoint={checkpoint}
+              select={setSelection}
+              nodeClick={nodeClick}
+              edgeClick={(id) => {
+                setSelection({ nodes: [], edges: [id] });
+                setInspectorOpen(true);
+                stopConnect();
+              }}
+              startConnect={(id) => startConnect(id)}
+              connect={connect}
+              setTool={setTool}
+              toggleSnap={() =>
+                storage.change((w) => ({
+                  ...w,
+                  preferences: { ...w.preferences, snap: !w.preferences.snap },
+                }))
+              }
+              add={() => setDialog("library")}
+              group={groupSelection}
+              ungroup={ungroup}
+              remove={remove}
+              undo={undo}
+              redo={redo}
+              canUndo={!!historyState?.past.length}
+              canRedo={!!historyState?.future.length}
+              fitKey={0}
+            />
+            <div className="findings">
+              <div>
+                <strong>{validFlow ? "설계 확인" : "전체 연결 관계"}</strong>
+                <button className="details-jump" onClick={showDetails}>
+                  <ArrowDown size={14} />
+                  아래에서 속성·진단 보기
+                </button>
+                <span className={problems ? "issue-text" : ""}>
+                  {problems
+                    ? `문제 후보 ${problems}곳`
+                    : validFlow
+                      ? "설정한 수치를 확인하세요"
+                      : "모든 API의 요구 부하를 합산합니다"}
+                </span>
+              </div>
+              {flowResult ? (
+                <div className="findings-values">
+                  <span>
+                    기본 지연 <b>{fmt(flowResult.latency)} ms</b>
+                  </span>
+                  <span>
+                    직렬 가용성 <b>{percent(flowResult.availability)}</b>
+                  </span>
+                  <span>{flowResult.required.length}개 항</span>
+                </div>
+              ) : (
+                <div className="legend">
+                  <span>
+                    <i className="line-swatch sync" />
+                    동기 · 실선
+                  </span>
+                  <span>
+                    <i className="line-swatch async" />
+                    비동기 · 점선
+                  </span>
+                  <span>
+                    <i className="line-swatch relation" />
+                    구성 관계
+                  </span>
+                </div>
+              )}
+            </div>
+          </main>
+          <div className="details-section" ref={detailsSection}>
+            <Inspector
+              graph={g}
+              flowId={validFlow}
+              open={inspectorOpen}
+              toggleOpen={() => setInspectorOpen(!inspectorOpen)}
+              showCanvas={() => scrollToSection(canvasSection.current)}
+              nodeIds={selection.nodes}
+              edgeIds={selection.edges}
+              source={source}
+              connectionKind={connectionKind}
+              update={updateGraph}
+              startConnect={startConnect}
+              stopConnect={stopConnect}
+              selectNode={(id) => setSelection({ nodes: [id], edges: [] })}
+              selectEdge={(id) => {
+                setSelection({ nodes: [], edges: [id] });
+                stopConnect();
+              }}
+              remove={remove}
+              duplicate={(id) =>
+                addComponent(
+                  g.nodes.find((n) => n.id === id)!.data.catalogId,
+                  id,
+                )
+              }
+              checkpoint={checkpoint}
+            />
           </div>
-        </main>
-        <Inspector
-          graph={g}
-          flowId={validFlow}
-          open={inspectorOpen}
-          expanded={inspectorExpanded}
-          toggleOpen={() => setInspectorOpen(!inspectorOpen)}
-          toggleExpanded={() => {
-            setInspectorOpen(true);
-            setInspectorExpanded(!inspectorExpanded);
-          }}
-          nodeIds={selection.nodes}
-          edgeIds={selection.edges}
-          source={source}
-          connectionKind={connectionKind}
-          update={updateGraph}
-          startConnect={startConnect}
-          stopConnect={stopConnect}
-          selectNode={(id) => setSelection({ nodes: [id], edges: [] })}
-          selectEdge={(id) => {
-            setSelection({ nodes: [], edges: [id] });
-            stopConnect();
-          }}
-          remove={remove}
-          duplicate={(id) =>
-            addComponent(g.nodes.find((n) => n.id === id)!.data.catalogId, id)
-          }
-          checkpoint={checkpoint}
-        />
+        </div>
       </div>
       <footer className="statusbar">
         <span>

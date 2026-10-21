@@ -7,8 +7,7 @@ import {
   Copy,
   Send,
   Trash2,
-  Maximize2,
-  Minimize2,
+  ArrowUp,
   ChevronDown,
   ChevronUp,
   ShieldCheck,
@@ -40,9 +39,8 @@ type Props = {
   duplicate: (id: string) => void;
   checkpoint: () => void;
   open: boolean;
-  expanded: boolean;
   toggleOpen: () => void;
-  toggleExpanded: () => void;
+  showCanvas: () => void;
 };
 function NumberField({
   label,
@@ -194,16 +192,15 @@ export function Inspector(p: Props) {
           {n?.data.name || (edge ? "연결 설정" : flow?.name || "속성 · 진단")}
         </span>
         <button
-          aria-label={
-            p.expanded ? "아래 패널 기본 크기" : "아래 패널 크게 보기"
-          }
-          title={p.expanded ? "기본 크기" : "크게 보기"}
-          onClick={p.toggleExpanded}
+          aria-label="아키텍처로 돌아가기"
+          title="아키텍처로 돌아가기"
+          onClick={p.showCanvas}
         >
-          {p.expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+          <ArrowUp size={16} />
+          <span className="back-to-canvas">아키텍처로</span>
         </button>
         <button
-          aria-label={p.open ? "아래 패널 접기" : "아래 패널 펼치기"}
+          aria-label={p.open ? "상세 정보 접기" : "상세 정보 펼치기"}
           aria-expanded={p.open}
           aria-controls="inspector-content"
           title={p.open ? "접기" : "펼치기"}
