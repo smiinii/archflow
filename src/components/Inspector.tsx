@@ -22,7 +22,8 @@ import {
   type Params,
   type Vertex,
 } from "../lib/model";
-import { CARD_MIN, fitGroups } from "../lib/readability";
+import { CARD_MIN, fitGroups, positionIsFixed } from "../lib/readability";
+import { CardAppearance } from "./CardAppearance";
 import { TechIcon } from "./Icons";
 type Props = {
   graph: Graph;
@@ -735,6 +736,37 @@ export function Inspector(p: Props) {
                       }
                     />
                   </label>
+                  {n.type === "component" && (
+                    <>
+                      <CardAppearance
+                        value={n.data.style}
+                        onChange={(style) => {
+                          p.checkpoint();
+                          data({ style });
+                        }}
+                      />
+                      <button
+                        className="outline"
+                        onClick={() => {
+                          p.checkpoint();
+                          nodeUpdate({ width: 200, height: 140 });
+                        }}
+                      >
+                        기본 크기 200×140으로 맞추기
+                      </button>
+                    </>
+                  )}
+                  <label className="check-row">
+                    <input
+                      type="checkbox"
+                      checked={!!n.data.positionLocked}
+                      onChange={(e) => {
+                        p.checkpoint();
+                        data({ positionLocked: e.target.checked });
+                      }}
+                    />
+                    위치 고정 · 자동 배치와 드래그에서 유지
+                  </label>
                   <div className="two-cols">
                     <NumberField
                       label="너비 · px"
@@ -764,6 +796,12 @@ export function Inspector(p: Props) {
                   {n.type === "group" && (
                     <button
                       className="outline"
+                      disabled={positionIsFixed(n, p.graph.nodes)}
+                      title={
+                        positionIsFixed(n, p.graph.nodes)
+                          ? "그룹과 자식의 위치 고정을 해제해 주세요."
+                          : "자식의 절대 위치를 유지합니다."
+                      }
                       onClick={() => {
                         p.checkpoint();
                         p.update((g) => fitGroups(g, n.id));

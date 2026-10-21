@@ -7,6 +7,7 @@ import {
   useState,
   type Dispatch,
   type SetStateAction,
+  type CSSProperties,
 } from "react";
 import {
   ReactFlow,
@@ -44,6 +45,7 @@ import {
   Maximize,
   Link2,
 } from "lucide-react";
+import { resolveCardStyle } from "../lib/appearance";
 import { getItem } from "../lib/catalog";
 import { allMetrics, fmt, type Metric } from "../lib/analysis";
 import {
@@ -53,7 +55,12 @@ import {
   type Link,
   type Vertex,
 } from "../lib/model";
-import { CARD_MIN, flowView, type Change } from "../lib/readability";
+import {
+  CARD_MIN,
+  flowView,
+  positionIsFixed,
+  type Change,
+} from "../lib/readability";
 import { routeGraph, type Route } from "../lib/routing";
 import { snapPosition, type Guide } from "../lib/alignment";
 import { TechIcon } from "./Icons";
@@ -115,8 +122,17 @@ function ComponentNode({
     m = context.metrics[id];
   const item = getItem(data.catalogId),
     muted = context.active && !context.active.has(id);
+  const look = resolveCardStyle(data.style);
   return (
     <div
+      style={
+        {
+          backgroundColor: look.backgroundColor,
+          "--card-role-size": `${look.fontSize}px`,
+          "--card-role-weight": look.fontWeight,
+          "--card-icon-size": `${look.iconSize}px`,
+        } as CSSProperties
+      }
       className={
         "architecture-node " +
         (m?.bad ? "problem " : "") +
@@ -160,8 +176,8 @@ function ComponentNode({
         />
       ))}
       <div className="node-tech">
-        <TechIcon id={data.catalogId} />
-        <span>{item.title}</span>
+        <TechIcon id={data.catalogId} size={look.iconSize} />
+        <span title={item.title}>{item.title}</span>
       </div>
       <strong title={data.name}>{data.name}</strong>
       {selected && (
@@ -463,6 +479,8 @@ function CanvasInner(p: Props) {
         n.type === "group" ? n.height : Math.max(n.height, CARD_MIN.height),
     },
     selected: p.selection.nodes.includes(n.id),
+    draggable:
+      !p.readOnly && p.tool === "select" && !positionIsFixed(n, g.nodes),
     dragHandle: n.type === "group" ? ".group-title" : undefined,
     zIndex: n.type === "group" ? 0 : 2,
   })) as Node[];
@@ -504,7 +522,7 @@ function CanvasInner(p: Props) {
       .filter((n) => n.type !== "group")
       .map((n) => ({ id: n.id })),
   };
-  const signature = `${p.flowId}:${p.focused}:${p.fitKey}`;
+  const signature = `${p.flowId}:${p.focused}:${p.fitKey}:${!!visibleGraph.nodes.length}`;
   async function fitReadable() {
     await api.fitView({ ...currentFit, duration: 0 });
     const components = visibleGraph.nodes.filter((n) => n.type !== "group");
@@ -593,7 +611,11 @@ function CanvasInner(p: Props) {
         let next = n;
         for (const c of edits)
           if ("id" in c && c.id === n.id) {
-            if (c.type === "position" && c.position)
+            if (
+              c.type === "position" &&
+              c.position &&
+              !positionIsFixed(n, graph.nodes)
+            )
               next = {
                 ...next,
                 position: { x: c.position.x + dx, y: c.position.y + dy },

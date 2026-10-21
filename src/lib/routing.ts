@@ -42,6 +42,31 @@ function extend(p: Point, side: string, gap: number): Point {
     y: p.y + (side === "bottom" ? gap : side === "top" ? -gap : 0),
   };
 }
+function segmentCrossing(a: Point, b: Point, u: Point, v: Point) {
+  if (a.x === b.x && u.y === v.y)
+    return (
+      a.x >= Math.min(u.x, v.x) &&
+      a.x <= Math.max(u.x, v.x) &&
+      u.y >= Math.min(a.y, b.y) &&
+      u.y <= Math.max(a.y, b.y)
+    );
+  if (a.y === b.y && u.x === v.x)
+    return (
+      u.x >= Math.min(a.x, b.x) &&
+      u.x <= Math.max(a.x, b.x) &&
+      a.y >= Math.min(u.y, v.y) &&
+      a.y <= Math.max(u.y, v.y)
+    );
+  return false;
+}
+const crossingCount = (a: Point, b: Point, used: Point[][]) =>
+  used.reduce(
+    (sum, points) =>
+      sum +
+      points.slice(1).filter((v, i) => segmentCrossing(a, b, points[i], v))
+        .length,
+    0,
+  );
 class Heap {
   a: { key: string; score: number }[] = [];
   push(value: { key: string; score: number }) {
@@ -144,7 +169,8 @@ function search(
       const value =
         cost.get(key)! +
         length(p, q) +
-        (dir && dir !== nextDir ? 25 : 0) +
+        (dir && dir !== nextDir ? 30 : 0) +
+        crossingCount(p, q, used) * 140 +
         (shared ? length(p, q) * 2 + 60 : 0);
       if (value >= (cost.get(nextKey) ?? Infinity)) continue;
       cost.set(nextKey, value);
@@ -218,34 +244,64 @@ export function routeGraph(g: Graph): Record<string, Route> {
     siblings.set(pair, lane + 1);
     const dx = b.x + b.width / 2 - a.x - a.width / 2,
       dy = b.y + b.height / 2 - a.y - a.height / 2;
-    const sourceSide =
-      e.sourceHandle?.split("-")[0] ||
-      (Math.abs(dx) > Math.abs(dy)
-        ? dx >= 0
-          ? "right"
-          : "left"
-        : dy >= 0
-          ? "bottom"
-          : "top");
-    const targetSide =
-      e.targetHandle?.split("-")[0] ||
-      { right: "left", left: "right", bottom: "top", top: "bottom" }[
-        sourceSide
-      ]!;
-    const start = port(a, sourceSide, 6),
-      end = port(b, targetSide, -6),
-      out = extend(start, sourceSide, 26 + lane * 18),
-      into = extend(end, targetSide, 26 + lane * 18);
-    const middle = search(out, into, obstacles, used, lane);
-    const blocked =
-      !middle ||
-      boxes.some(
-        (r) =>
-          (r !== a && crosses(start, out, inflate(r, 4))) ||
-          (r !== b && crosses(into, end, inflate(r, 4))),
-      );
-    const points = middle ? [start, ...middle, end] : [];
-    if (middle) used.push(points);
+    const horizontal = dx >= 0 ? "right" : "left",
+      vertical = dy >= 0 ? "bottom" : "top";
+    const opposite: Record<string, string> = {
+      right: "left",
+      left: "right",
+      bottom: "top",
+      top: "bottom",
+    };
+    const primary = Math.abs(dx) > Math.abs(dy) ? horizontal : vertical;
+    const other = primary === horizontal ? vertical : horizontal;
+    const pairs = [
+      [primary, opposite[primary]],
+      [other, opposite[other]],
+      [primary, opposite[other]],
+      [other, opposite[primary]],
+    ];
+    let sourceSide = e.sourceHandle?.split("-")[0] || primary,
+      targetSide = e.targetHandle?.split("-")[0] || opposite[primary];
+    let points: Point[] = [],
+      best = Infinity;
+    const tried = new Set<string>();
+    for (const pair of pairs) {
+      const s = e.sourceHandle?.split("-")[0] || pair[0],
+        t = e.targetHandle?.split("-")[0] || pair[1];
+      if (tried.has(s + t)) continue;
+      tried.add(s + t);
+      const start = port(a, s, 6),
+        end = port(b, t, -6),
+        out = extend(start, s, 26 + lane * 18),
+        into = extend(end, t, 26 + lane * 18);
+      if (
+        boxes.some(
+          (r) =>
+            (r !== a && crosses(start, out, inflate(r, 4))) ||
+            (r !== b && crosses(into, end, inflate(r, 4))),
+        )
+      )
+        continue;
+      const middle = search(out, into, obstacles, used, lane);
+      if (!middle) continue;
+      const candidate = [start, ...middle, end];
+      const distance = candidate
+        .slice(1)
+        .reduce((sum, p, i) => sum + length(candidate[i], p), 0);
+      const crossings = candidate
+        .slice(1)
+        .reduce((sum, p, i) => sum + crossingCount(candidate[i], p, used), 0);
+      const score = distance + (middle.length - 2) * 30 + crossings * 140;
+      if (score < best) {
+        best = score;
+        points = candidate;
+        sourceSide = s;
+        targetSide = t;
+      }
+      if (!crossings && distance <= length(start, end) * 1.4 + 80) break;
+    }
+    const blocked = !points.length;
+    if (points.length) used.push(points);
     const text = shortLabel(e),
       width = Math.min(
         220,

@@ -15,6 +15,12 @@ const fields: Record<string, string> = {
   basis: "수치 근거",
   kind: "연결 방식",
   position: "위치",
+  backgroundColor: "카드 배경색",
+  fontSize: "역할 글씨 크기",
+  fontWeight: "글씨 굵기",
+  iconSize: "로고 크기",
+  positionLocked: "위치 고정",
+  style: "카드 디자인",
 };
 export function inspectImport(text: string): {
   graph: Graph | null;
@@ -36,7 +42,9 @@ export function inspectImport(text: string): {
     const parsed = graphSchema.safeParse(raw);
     const unsupported: string[] = [];
     const scan = (value: unknown, schema: z.ZodType, path: string) => {
-      // Public style support is intentionally closed: never silently accept unknown design fields.
+      // Only documented style fields are accepted; unknown fields need explicit review.
+      while (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable)
+        schema = schema.unwrap() as z.ZodType;
       if (!value || typeof value !== "object" || Array.isArray(value)) return;
       if (schema instanceof z.ZodObject)
         for (const [key, v] of Object.entries(value)) {
@@ -86,6 +94,8 @@ export function inspectImport(text: string): {
         detail = `최소 ${issue.minimum}${typeof value === "string" ? "자" : ""}가 필요합니다.`;
       else if (issue.code === "invalid_type")
         detail = `현재 ${value === null ? "null" : typeof value}, ${issue.expected} 값이 필요합니다.${key === "replicas" || key === "calls" || key === "hitPercent" ? " 이 필드는 null 대신 기본값과 미확인 근거를 사용하세요." : ""}`;
+      else if (issue.code === "unrecognized_keys")
+        detail = `지원하지 않는 설정: ${issue.keys.join(", ")}. data.style에는 backgroundColor·fontSize·fontWeight·iconSize만 사용하세요.`;
       else if (issue.code === "invalid_value")
         detail = `허용값: ${issue.values.join(", ")}`;
       return { path, message: `${name} · ${field}: ${detail}` };

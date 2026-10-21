@@ -159,7 +159,8 @@ export function AiStructureDialog({
             </summary>
             <p className="help">
               역할 이름을 바꿔도 기술 아이콘은 유지됩니다. custom은 사용자 정의
-              기본 디자인이며 임의의 style·아이콘 URL은 지원하지 않습니다.
+              기본 디자인입니다. data.style의 배경·글씨·로고 설정을 지원하며
+              임의의 CSS·아이콘 URL은 지원하지 않습니다.
             </p>
             <datalist id="catalog-id-options">
               {catalog.map((c) => (
@@ -366,7 +367,9 @@ export function AiStructureDialog({
             <div className="notice">
               <strong>배치 변경 미리보기</strong>
               <p>
-                박스 간격과 그룹 여백을 조정합니다. 적용 전 원본은 유지됩니다.
+                고정하지 않은 카드를 200×140으로 정리하고 주 흐름을 좌우로
+                배치합니다. 위치 고정 요소와 그 그룹은 유지하며 적용 전 원본은
+                바꾸지 않습니다.
               </p>
               <div className="button-row">
                 <button

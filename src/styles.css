@@ -2816,3 +2816,130 @@ details p {
     right: 16px;
   }
 }
+
+/* Compact cards: one technology row, two left-aligned role lines, one status row. */
+.architecture-node {
+  min-height: 140px;
+  grid-template-rows: var(--card-icon-size, 32px) minmax(
+      calc(var(--card-role-size, 17px) * 2.6),
+      1fr
+    ) 22px;
+  gap: 4px;
+  padding: 10px 12px;
+}
+.architecture-node > strong {
+  font-size: var(--card-role-size, 17px);
+  font-weight: var(--card-role-weight, 600);
+  line-height: 1.3;
+  max-height: 2.6em;
+  text-align: left;
+}
+.node-tech {
+  gap: 7px;
+}
+.node-tech > span {
+  font-size: 11px;
+  color: #797583;
+}
+.node-tech .tech-icon {
+  max-width: var(--card-icon-size, 32px);
+  object-fit: contain;
+}
+.node-status {
+  padding-top: 4px;
+  line-height: 16px;
+}
+.architecture-node.problem {
+  border: 1.5px solid #cd6678;
+  box-shadow:
+    0 0 0 1px #cd66781a,
+    0 5px 14px #24213408;
+}
+.card-appearance fieldset {
+  border: 0;
+  margin: 10px 0;
+  padding: 0;
+  min-width: 0;
+}
+.card-appearance legend {
+  font-size: 11px;
+  color: #898291;
+  margin-bottom: 8px;
+}
+.color-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.color-presets button {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 5px;
+  font-size: 10px;
+  color: #8a8293;
+  min-width: 42px;
+}
+.color-presets button[aria-pressed="true"] {
+  border-color: #a297c2;
+  background: #f8f6fc;
+  color: #65537f;
+}
+.color-presets button > span {
+  width: 26px;
+  height: 23px;
+  border: 1px solid #ddd9e6;
+  border-radius: 5px;
+}
+.appearance-numbers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.appearance-numbers label {
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  color: #898291;
+  min-width: 0;
+}
+.appearance-numbers select {
+  padding: 7px 4px;
+  border: 1px solid #e5dfed;
+  border-radius: 5px;
+  background: #fff;
+  color: #6b6179;
+  min-width: 0;
+  width: 100%;
+  font-size: 11px;
+}
+.library-appearance {
+  padding: 10px 12px;
+  border: 1px solid #e6e3ed;
+  border-radius: 8px;
+  margin: 12px 0;
+}
+.library-appearance summary {
+  font-size: 12px;
+  color: #81748d;
+  cursor: pointer;
+}
+.library-appearance .card-appearance {
+  display: flex;
+  gap: 20px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.library-appearance .appearance-numbers {
+  min-width: 260px;
+  flex: 1;
+}
+.node-tech > .tech-icon {
+  width: auto;
+  height: var(--card-icon-size, 32px);
+  max-width: calc(var(--card-icon-size, 32px) * 2);
+  object-fit: contain;
+}

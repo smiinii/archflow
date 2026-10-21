@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cardStyleSchema } from "./appearance";
 
 const id = z
   .string()
@@ -32,6 +33,8 @@ export const vertexSchema = z.object({
     name: z.string().min(1).max(80),
     note: z.string().max(4000),
     params: paramsSchema,
+    style: cardStyleSchema.optional(),
+    positionLocked: z.boolean().optional(),
   }),
 });
 export const linkSchema = z.object({
@@ -98,6 +101,11 @@ export const graphSchema = z
       });
     }
     g.nodes.forEach((n, i) => {
+      if (n.type === "group" && n.data.style)
+        issue(
+          ["nodes", i, "data", "style"],
+          "카드 디자인은 component에만 지정합니다. 그룹의 data.style을 제거해 주세요.",
+        );
       if (
         n.parentId &&
         (n.type === "group" ||

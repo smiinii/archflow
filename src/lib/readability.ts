@@ -1,5 +1,6 @@
+import { resolveCardStyle } from "./appearance";
 import { absolutePosition, type Graph, type Vertex } from "./model";
-export const CARD_MIN = { width: 200, height: 148 };
+export const CARD_MIN = { width: 200, height: 140 };
 export const GROUP_PAD = 28,
   GROUP_TITLE = 48;
 export type Rect = { x: number; y: number; width: number; height: number };
@@ -101,52 +102,135 @@ export function layoutWarnings(g: Graph) {
         );
   return warnings;
 }
-export function readableLayout(g: Graph): Graph {
-  let nodes = g.nodes.map((n) => ({
-    ...n,
-    position: { ...n.position },
-    width: Math.max(n.width, n.type === "group" ? 240 : CARD_MIN.width),
-    height: Math.max(n.height, n.type === "group" ? 200 : CARD_MIN.height),
-  }));
-  // Pack children first, keeping their parent membership and all graph references.
-  for (const group of nodes.filter((n) => n.type === "group")) {
-    const children = nodes.filter((n) => n.parentId === group.id);
-    const cols = Math.min(
-      3,
-      Math.max(1, Math.ceil(Math.sqrt(children.length))),
+export const positionIsFixed = (n: Vertex, nodes: Vertex[]) =>
+  !!n.data.positionLocked ||
+  !!nodes.find((p) => p.id === n.parentId)?.data.positionLocked ||
+  (n.type === "group" &&
+    nodes.some((c) => c.parentId === n.id && c.data.positionLocked));
+// Breadth-first columns give a left-to-right reading order. Back edges remain in the graph.
+function flowRanks(
+  nodes: Vertex[],
+  g: Graph,
+  collapse: (id: string) => string,
+) {
+  const ids = new Set(nodes.map((n) => n.id));
+  const links = g.edges
+    .filter(
+      (e) => e.data.kind !== "relation" && e.data.purpose !== "dependency",
+    )
+    .map((e) => ({ source: collapse(e.source), target: collapse(e.target) }))
+    .filter(
+      (e) => ids.has(e.source) && ids.has(e.target) && e.source !== e.target,
     );
-    const cw = Math.max(CARD_MIN.width, ...children.map((n) => n.width)) + 100;
-    const ch = Math.max(CARD_MIN.height, ...children.map((n) => n.height)) + 92;
-    nodes = nodes.map((n) => {
-      const i = children.findIndex((c) => c.id === n.id);
-      return i < 0
-        ? n
-        : {
-            ...n,
-            position: {
-              x: GROUP_PAD + (i % cols) * cw,
-              y: GROUP_TITLE + Math.floor(i / cols) * ch,
-            },
-          };
-    });
+  const ranks = new Map<string, number>();
+  const roots = [
+    ...new Set([
+      ...nodes.filter((n) => n.data.catalogId === "client").map((n) => n.id),
+      ...nodes
+        .filter((n) => !links.some((e) => e.target === n.id))
+        .map((n) => n.id),
+      ...g.flows
+        .map((f) => (f.entryId ? collapse(f.entryId) : ""))
+        .filter((id) => ids.has(id)),
+    ]),
+  ];
+  for (const root of [...roots, ...nodes.map((n) => n.id)]) {
+    if (ranks.has(root)) continue;
+    ranks.set(root, 0);
+    const queue = [root];
+    while (queue.length) {
+      const id = queue.shift()!;
+      for (const e of links.filter((e) => e.source === id))
+        if (!ranks.has(e.target)) {
+          ranks.set(e.target, ranks.get(id)! + 1);
+          queue.push(e.target);
+        }
+    }
   }
-  nodes = fitGroups({ ...g, nodes }).nodes;
-  const roots = nodes.filter((n) => !n.parentId);
-  const cols = Math.min(3, Math.max(1, Math.ceil(Math.sqrt(roots.length))));
-  const cw = Math.max(0, ...roots.map((n) => n.width)) + 160;
-  const ch = Math.max(0, ...roots.map((n) => n.height)) + 150;
-  nodes = nodes.map((n) => {
-    const i = roots.findIndex((r) => r.id === n.id);
-    return i < 0
+  return ranks;
+}
+function packColumns(
+  nodes: Vertex[],
+  ranks: Map<string, number>,
+  fixed: Set<string>,
+  origin: { x: number; y: number },
+) {
+  const widths = new Map<number, number>();
+  for (const n of nodes)
+    widths.set(
+      ranks.get(n.id) || 0,
+      Math.max(widths.get(ranks.get(n.id) || 0) || 0, n.width),
+    );
+  const xs = new Map<number, number>();
+  let x = origin.x;
+  for (const rank of [...widths.keys()].sort((a, b) => a - b)) {
+    xs.set(rank, x);
+    x += widths.get(rank)! + 76;
+  }
+  const occupied: Rect[] = nodes
+    .filter((n) => fixed.has(n.id))
+    .map((n) => ({ ...n.position, width: n.width, height: n.height }));
+  const nextY = new Map<number, number>();
+  return nodes.map((n) => {
+    if (fixed.has(n.id)) return n;
+    const rank = ranks.get(n.id) || 0;
+    let candidate = {
+      x: xs.get(rank) || origin.x,
+      y: nextY.get(rank) || origin.y,
+      width: n.width,
+      height: n.height,
+    };
+    let blockers = occupied.filter((r) => overlaps(candidate, r, 36));
+    while (blockers.length) {
+      candidate = {
+        ...candidate,
+        y: Math.max(...blockers.map((r) => r.y + r.height)) + 40,
+      };
+      blockers = occupied.filter((r) => overlaps(candidate, r, 36));
+    }
+    occupied.push(candidate);
+    nextY.set(rank, candidate.y + n.height + 48);
+    return { ...n, position: { x: candidate.x, y: candidate.y } };
+  });
+}
+export function readableLayout(g: Graph): Graph {
+  const fixedRoots = new Set(
+    g.nodes
+      .filter((n) => !n.parentId && positionIsFixed(n, g.nodes))
+      .map((n) => n.id),
+  );
+  // A group containing an anchored child stays intact, including its local coordinates.
+  let nodes = g.nodes.map((n) =>
+    fixedRoots.has(n.id) || (n.parentId && fixedRoots.has(n.parentId))
       ? n
       : {
           ...n,
-          position: {
-            x: 80 + (i % cols) * cw,
-            y: 100 + Math.floor(i / cols) * ch,
-          },
-        };
+          position: { ...n.position },
+          width: n.type === "component" ? CARD_MIN.width : n.width,
+          height: n.type === "component" ? CARD_MIN.height : n.height,
+        },
+  );
+  for (const group of nodes.filter(
+    (n) => n.type === "group" && !fixedRoots.has(n.id),
+  )) {
+    const children = nodes.filter((n) => n.parentId === group.id);
+    const placed = packColumns(
+      children,
+      flowRanks(children, g, (id) => id),
+      new Set(),
+      { x: GROUP_PAD, y: GROUP_TITLE },
+    );
+    nodes = nodes.map((n) => placed.find((p) => p.id === n.id) || n);
+    nodes = fitGroups({ ...g, nodes }, group.id).nodes;
+  }
+  const roots = nodes.filter((n) => !n.parentId);
+  const collapse = (id: string) =>
+    nodes.find((n) => n.id === id)?.parentId || id;
+  const placed = packColumns(roots, flowRanks(roots, g, collapse), fixedRoots, {
+    x: 80,
+    y: 100,
   });
+  nodes = nodes.map((n) => placed.find((p) => p.id === n.id) || n);
   return { ...g, nodes };
 }
 export type Change = {
@@ -162,6 +246,13 @@ export function compareGraphs(base: Graph, next: Graph): Change[] {
     const kinds: string[] = [];
     if (!prev) kinds.push("추가");
     else {
+      if (
+        JSON.stringify(resolveCardStyle(prev.data.style)) !==
+        JSON.stringify(resolveCardStyle(n.data.style))
+      )
+        kinds.push("디자인 변경");
+      if (!!prev.data.positionLocked !== !!n.data.positionLocked)
+        kinds.push("위치 고정 변경");
       if (prev.parentId !== n.parentId) kinds.push("그룹 변경");
       if (
         JSON.stringify(absolutePosition(prev, base.nodes)) !==

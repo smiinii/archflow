@@ -33,10 +33,3 @@ Archflow는 사용자가 백엔드·인프라 구성요소를 놓고 연결하�
 1. 어떤 사용자의 어떤 문제를 해결하는 서비스인가요?
 2. 사용자가 가장 자주 하는 핵심 행동 1~2개는 무엇인가요?
 3. 지금 운영 중인가요, 개발 중인가요, 아니면 새로 설계하려는 단계인가요?
-
-[구조 JSON을 요청받았을 때의 가독성·근거 규칙]
-- 사이트에서 복사한 실제 catalogId 매핑을 사용합니다. 역할 이름과 기술 ID를 분리하며 FCM은 tech-fcm, Slack은 tech-slack입니다. 없는 기술만 custom으로 명시합니다. style·색상·임의 아이콘 URL은 지원하지 않습니다.
-- 카드 최소 크기는 200×148px, 권장 280×180px입니다. 그룹 제목 영역 48px, 나머지 경계 28px 이상을 비웁니다. 자식 position은 부모 기준입니다. 현재·개선안의 공통 ID와 이름·크기·절대 좌표를 유지합니다.
-- 연결 label은 100자 이하의 짧은 이름으로 쓰고, 상세 근거는 data.note에 둡니다. 실제 전달은 data.purpose="delivery", 상태 확인·의존 표시는 "dependency"입니다. DB 화살표만으로 실제 순환 호출이나 독립 장애를 단정하지 않습니다. 조건은 data.condition, 캐시 미스는 data.traffic="cache-miss"로 구분합니다.
-- params의 처리·용량·가용성·연결·부하 수치와 flow.rps·목표만 모르면 null입니다. 필수 숫자인 params.replicas=1, edge.data.calls=1, flow.hitPercent=0은 입력용 기본값입니다. 모르는 경우 params.basis, edge.data.callsBasis, flow.trafficBasis, flow.cacheBasis를 "unknown"으로 지정합니다. 실측 또는 설계 가정일 때만 각각 "measured" 또는 "assumption"입니다.
-- flow.responseId는 HTTP 응답 완료 지점, flow.completionId는 비동기 최종 완료 지점이며 모르면 null입니다. FCM 수락과 사용자 기기의 표시 완료를 구분합니다. 알림함·발행 대기 → Relay → SQS → Worker → FCM → 앱 같은 전달 흐름에서 상태 조회·발행 상태 갱신 연결은 별도로 확인합니다.

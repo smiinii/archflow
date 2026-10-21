@@ -36,14 +36,8 @@ import {
   Undo2,
 } from "lucide-react";
 import type { Connection } from "@xyflow/react";
-import interviewPrompt from "../docs/ai-interview-prompt.txt?raw";
-import {
-  catalog,
-  catalogMappingText,
-  promptCatalogIds,
-  categoryName,
-  getItem,
-} from "./lib/catalog";
+import { buildInterviewPrompt } from "./lib/aiPrompt";
+import { catalog, categoryName, getItem } from "./lib/catalog";
 import { analyze, allMetrics, fmt, percent } from "./lib/analysis";
 import {
   absolutePosition,
@@ -62,6 +56,8 @@ import {
 import { useWorkspace } from "./lib/useWorkspace";
 import { loadLocal } from "./lib/storage";
 import { supabase } from "./lib/supabase";
+import { CardAppearance } from "./components/CardAppearance";
+import { defaultCardStyle, type CardStyle } from "./lib/appearance";
 import { Canvas, type LabelMode } from "./components/Canvas";
 import { AiStructureDialog } from "./components/AiStructureDialog";
 import { GraphPreview } from "./components/GraphPreview";
@@ -353,7 +349,7 @@ export default function App() {
       setSelection({ nodes: [source], edges: [] });
     } else setInspectorOpen(true);
   }
-  function addComponent(catalogId: string, copyId?: string) {
+  function addComponent(catalogId: string, copyId?: string, style?: CardStyle) {
     if (!g) return;
     if (g.nodes.length >= 1000) {
       setMessage("프로젝트당 최대 1,000개 요소를 지원합니다.");
@@ -374,21 +370,23 @@ export default function App() {
           },
           data: {
             ...structuredClone(copy.data),
-            name: copy.data.name + " 사본",
+            name: (copy.data.name + " 사본").slice(0, 80),
+            positionLocked: false,
           },
         }
       : {
           id,
           type: "component",
           position: {
-            x: 180 + (g.nodes.length % 4) * 210,
-            y: 160 + Math.floor(g.nodes.length / 4) * 160,
+            x: 180 + (g.nodes.length % 4) * 280,
+            y: 160 + Math.floor(g.nodes.length / 4) * 200,
           },
-          width: 220,
-          height: 148,
+          width: 200,
+          height: 140,
           data: {
             catalogId,
             name: item.name,
+            style: style || { ...defaultCardStyle },
             note: "",
             params: defaultParams(),
           },
@@ -1184,7 +1182,10 @@ export default function App() {
         </div>
       )}
       {dialog === "library" && (
-        <Library close={() => setDialog(null)} add={addComponent} />
+        <Library
+          close={() => setDialog(null)}
+          add={(id, style) => addComponent(id, undefined, style)}
+        />
       )}
       {dialog === "delete-project" && projectToDelete && (
         <Modal
@@ -1343,8 +1344,9 @@ export default function App() {
           wide
         >
           <p className="help">
-            박스 크기·위치와 그룹 여백을 조정합니다. 연결과 소속은 유지합니다.
-            적용 후 실행 취소로 되돌릴 수 있습니다.
+            카드를 200×140으로 정리하고 주 흐름을 좌우로 배치합니다. 위치 고정
+            요소와 그 그룹, 모든 연결과 소속은 유지합니다. 적용 후 실행 취소로
+            되돌릴 수 있습니다.
           </p>
           <GraphPreview graph={layoutPreview} flowId={validFlow} />
           <div className="button-row">
@@ -1458,8 +1460,9 @@ function Library({
   add,
 }: {
   close: () => void;
-  add: (id: string) => void;
+  add: (id: string, style?: CardStyle) => void;
 }) {
+  const [look, setLook] = useState<CardStyle>({ ...defaultCardStyle });
   const [query, setQuery] = useState(""),
     [provider, setProvider] = useState("all"),
     [category, setCategory] = useState("all"),
@@ -1487,6 +1490,10 @@ function Library({
         {catalog.filter((c) => c.provider === "backend").length}종 · LMS·기본
         구성요소
       </p>
+      <details className="library-appearance" open>
+        <summary>새 카드 디자인 · 기본 200×140</summary>
+        <CardAppearance value={look} onChange={setLook} />
+      </details>
       <label className="search-field">
         <Search size={16} />
         <input
@@ -1539,7 +1546,12 @@ function Library({
       </div>
       <div className="library-grid">
         {results.slice(page * 24, (page + 1) * 24).map((n) => (
-          <button key={n.id} className="library-item" onClick={() => add(n.id)}>
+          <button
+            key={n.id}
+            className="library-item"
+            style={{ backgroundColor: look.backgroundColor }}
+            onClick={() => add(n.id, look)}
+          >
             <TechIcon id={n.id} size={30} />
             <span>{n.title}</span>
             <small>{categoryName(n.category)}</small>
@@ -1565,7 +1577,7 @@ function Library({
           다음
         </button>
       </div>
-      <button className="text-button" onClick={() => add("custom")}>
+      <button className="text-button" onClick={() => add("custom", look)}>
         목록에 없는 사용자 정의 구성요소 추가
       </button>
       <p className="help">
@@ -1588,38 +1600,7 @@ function AiDialog({
 }) {
   const [include, setInclude] = useState(false),
     [copied, setCopied] = useState(false);
-  const example: Graph = {
-    schemaVersion: 1,
-    nodes: [
-      {
-        id: "api",
-        type: "component",
-        position: { x: 100, y: 100 },
-        width: 220,
-        height: 148,
-        data: {
-          catalogId: "api",
-          name: "회원 API",
-          note: "확인한 근거를 적습니다.",
-          params: defaultParams(),
-        },
-      },
-    ],
-    edges: [],
-    flows: [],
-  };
-  const schemaHelp = `\n\n[현재 Archflow의 AI 구조 적용 형식]\n인터뷰를 마친 후, 사용자 요청이 있으면 아래 Graph JSON 형식에 맞춘 구조를 추가로 출력할 수 있습니다. meanMs·slots·availability·networkMs·budgetMs·demand·rps·목표 수치만 모르면 null로 둡니다. replicas는 1, calls는 1, hitPercent는 0을 형식상 기본값으로 사용하고 params.basis, flow.trafficBasis/cacheBasis, edge.callsBasis를 unknown으로 표시하세요. 기존 구조와 개선안은 같은 ID·이름·크기·절대 위치를 유지한 별도 JSON으로 구분합니다.\n${JSON.stringify(example, null, 2)}\n연결: {id, source, target, data:{kind:"sync"|"async"|"relation",label,flowIds:[],calls:1,callsBasis:"unknown",purpose:"delivery"|"dependency",note:"상세 설명",condition:"조건",traffic:"all"|"cache-miss"}}.\n요청: {id,name,method:"GET"|"POST"|"PUT"|"PATCH"|"DELETE"|"EVENT",route,entryId,responseId:null,completionId:null,rps:null,trafficBasis:"unknown",hitPercent:0,cacheBasis:"unknown",latencyTarget:null,availabilityTarget:null,requiredIds:[]}.\n그룹은 type:"group", catalogId:"group"으로 만들고, 구성원의 parentId를 그룹 ID로 지정합니다. 구성원의 position은 그룹 기준 상대 좌표입니다. ID는 영문·숫자·하이픈·밑줄만 사용합니다. 모든 연결·요청 참조는 실제 ID와 일치해야 합니다. catalogId는 아래 실제 지원 ID 목록에서 정확히 고르세요. 없는 기술만 custom으로 명시하고 note에 기록하세요. style·색상·임의 아이콘 URL은 지원하지 않으므로 생성하지 마세요. 카드 최소 200×148px, 권장 280×180px, 그룹 제목 여백 48px·경계 여백 28px을 확보합니다. 연결 label은 최대 100자이지만 캔버스는 12자로 줄여 보이므로 짧은 이름을 쓰고 상세는 note에 둡니다. DB 상태 읽기·발행 상태 갱신은 purpose:dependency로 분리하되 실제 전달 호출은 delivery로 둡니다. 명확한 근거 없이 자동 분류하지 마세요. responseId는 HTTP 응답 완료, completionId는 비동기 최종 완료 지점이며 FCM 수락과 기기 화면 표시를 구분하세요. JSON은 AI 구조 적용 화면에서 검증 후 별도 프로젝트로 생성됩니다.`;
-  const prompt =
-    interviewPrompt +
-    schemaHelp +
-    "\n\n[주요 지원 catalogId = 기술명 · 전체 목록은 AI 구조 적용에서 복사 가능]\n" +
-    catalogMappingText(
-      promptCatalogIds(project.graph.nodes.map((n) => n.data.catalogId)),
-    ) +
-    (include
-      ? "\n\n[현재 캔버스 — 실제 서비스인지 먼저 확인할 참고 자료]\n" +
-        JSON.stringify(project.graph, null, 2)
-      : "");
+  const prompt = buildInterviewPrompt(project.graph, include);
   return (
     <Modal title="AI와 서비스 인터뷰" close={close} wide>
       <p className="help">

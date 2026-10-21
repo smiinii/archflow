@@ -37,3 +37,19 @@ describe("browser drafts", () => {
     expect((await loadLocal(null))?.data.projects[0].name).toBe("local");
   });
 });
+
+it("restores card colors, typography, icon size and position locks after storage parsing", async () => {
+  const r = record("appearance");
+  r.data.projects[0].graph.nodes[1].data.style = {
+    backgroundColor: "#F5F3FF",
+    fontSize: 18,
+    fontWeight: 700,
+    iconSize: 36,
+  };
+  r.data.projects[0].graph.nodes[1].data.positionLocked = true;
+  await saveLocal("appearance-test", r);
+  const loaded = await loadLocal("appearance-test");
+  expect(loaded?.data.projects[0].graph.nodes[1].data).toEqual(
+    r.data.projects[0].graph.nodes[1].data,
+  );
+});
