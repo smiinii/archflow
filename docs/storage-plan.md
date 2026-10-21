@@ -1,6 +1,6 @@
 # Archflow 저장·배포 권장안
 
-2026-10-21. 아래는 초기 설계 제안이며, 실제 앱은 사용자별 workspaces JSONB 스냅샷과 revision 비교 저장으로 구현했다. Supabase 서울 리전 프로젝트 생성과 마이그레이션, Vercel 운영 배포를 완료했다. 실제 이메일 로그인·클라우드 복원과 일반 사용자용 SMTP는 후속 확인 항목이다. 상세 상태는 deployment.md, SQL은 supabase/migrations를 따른다.
+2026-10-21. 아래는 초기 설계 제안이며, 실제 앱은 사용자별 workspaces JSONB 스냅샷과 revision 비교 저장으로 구현했다. Supabase 서울 리전 프로젝트 생성과 마이그레이션, Vercel 운영 배포를 완료했다. 이메일 로그인과 실제 DB 저장·revision 갱신을 확인했고, 사용자가 새로고침 후 프로젝트 유지를 확인했다. 다른 기기 복원과 일반 사용자용 SMTP는 후속 확인 항목이다. 상세 상태는 deployment.md, SQL은 supabase/migrations를 따른다.
 
 ## 권장 구성
 
