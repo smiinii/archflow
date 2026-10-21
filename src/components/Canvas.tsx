@@ -69,6 +69,7 @@ type Props = {
   checkpoint: () => void;
   select: Dispatch<SetStateAction<Selection>>;
   nodeClick: (id: string) => void;
+  edgeClick: (id: string) => void;
   startConnect: (id: string) => void;
   connect: (c: Connection) => void;
   setTool: (t: "select" | "pan") => void;
@@ -420,6 +421,7 @@ function CanvasInner(p: Props) {
             });
           }}
           onNodeClick={(_e, n) => p.nodeClick(n.id)}
+          onEdgeClick={(_e, edge) => p.edgeClick(edge.id)}
           onNodeDragStart={p.checkpoint}
           onNodeDragStop={() => setGuides([])}
           onSelectionDragStart={p.checkpoint}

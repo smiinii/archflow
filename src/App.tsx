@@ -907,6 +907,11 @@ export default function App() {
             checkpoint={checkpoint}
             select={setSelection}
             nodeClick={nodeClick}
+            edgeClick={(id) => {
+              setSelection({ nodes: [], edges: [id] });
+              setInspectorOpen(true);
+              stopConnect();
+            }}
             startConnect={(id) => startConnect(id)}
             connect={connect}
             setTool={setTool}
