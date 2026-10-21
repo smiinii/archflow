@@ -125,7 +125,13 @@ function flowRanks(
   const ranks = new Map<string, number>();
   const roots = [
     ...new Set([
-      ...nodes.filter((n) => n.data.catalogId === "client").map((n) => n.id),
+      ...nodes
+        .filter(
+          (n) =>
+            n.data.catalogId === "client" &&
+            !links.some((e) => e.target === n.id),
+        )
+        .map((n) => n.id),
       ...nodes
         .filter((n) => !links.some((e) => e.target === n.id))
         .map((n) => n.id),

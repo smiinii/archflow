@@ -56,6 +56,7 @@ export const linkSchema = z.object({
     calls: num(10000),
     traffic: z.enum(["all", "cache-miss"]),
     purpose: z.enum(["delivery", "dependency"]).optional(),
+    detailLevel: z.enum(["main", "detail"]).optional(),
     note: z.string().max(4000).optional(),
     condition: z.string().max(200).optional(),
     callsBasis: z.enum(["assumption", "measured", "unknown"]).optional(),
@@ -83,6 +84,23 @@ export const graphSchema = z
     nodes: z.array(vertexSchema).max(1000),
     edges: z.array(linkSchema).max(4000),
     flows: z.array(flowSchema).max(200),
+    views: z
+      .object({
+        overviewEdgeIds: z.array(id).max(4000).optional(),
+        overviewNodeIds: z.array(id).max(1000).optional(),
+        features: z
+          .array(
+            z.object({
+              id,
+              name: z.string().min(1).max(80),
+              flowIds: z.array(id).min(1).max(200),
+              mainEdgeIds: z.array(id).max(4000).optional(),
+            }),
+          )
+          .max(200)
+          .optional(),
+      })
+      .optional(),
   })
   .superRefine((g, ctx) => {
     const nodes = new Map(g.nodes.map((n) => [n.id, n]));
@@ -100,6 +118,42 @@ export const graphSchema = z
         seen.add(item.id);
       });
     }
+    const edgeIds = new Set(g.edges.map((e) => e.id));
+    const featureIds = new Set<string>();
+    g.views?.overviewNodeIds?.forEach((nid, i) => {
+      if (!nodes.has(nid))
+        issue(
+          ["views", "overviewNodeIds", i],
+          `존재하는 구성요소 ID를 지정해 주세요: ${nid}`,
+        );
+    });
+    g.views?.overviewEdgeIds?.forEach((eid, i) => {
+      if (!edgeIds.has(eid))
+        issue(
+          ["views", "overviewEdgeIds", i],
+          `존재하는 연결 ID를 지정해 주세요: ${eid}`,
+        );
+    });
+    g.views?.features?.forEach((f, i) => {
+      if (featureIds.has(f.id))
+        issue(["views", "features", i, "id"], "기능 ID가 중복됩니다.");
+      featureIds.add(f.id);
+      f.flowIds.forEach((fid, j) => {
+        if (!flows.has(fid))
+          issue(
+            ["views", "features", i, "flowIds", j],
+            `존재하는 요청 ID를 지정해 주세요: ${fid}`,
+          );
+      });
+      f.mainEdgeIds?.forEach((eid, j) => {
+        const e = g.edges.find((e) => e.id === eid);
+        if (!e || !e.data.flowIds.some((fid) => f.flowIds.includes(fid)))
+          issue(
+            ["views", "features", i, "mainEdgeIds", j],
+            `이 기능에 포함된 연결 ID를 지정해 주세요: ${eid}`,
+          );
+      });
+    });
     g.nodes.forEach((n, i) => {
       if (n.type === "group" && n.data.style)
         issue(
@@ -249,6 +303,50 @@ export const createFlow = (name = "새 요청"): Flow => ({
   availabilityTarget: null,
   requiredIds: [],
 });
+export function reconcileViews(g: Graph): Graph {
+  if (!g.views) return g;
+  const edges = new Map(g.edges.map((e) => [e.id, e]));
+  const flows = new Set(g.flows.map((f) => f.id));
+  return {
+    ...g,
+    views: {
+      ...g.views,
+      ...(g.views.overviewNodeIds
+        ? {
+            overviewNodeIds: g.views.overviewNodeIds.filter((id) =>
+              g.nodes.some((n) => n.id === id),
+            ),
+          }
+        : {}),
+      ...(g.views.overviewEdgeIds
+        ? {
+            overviewEdgeIds: g.views.overviewEdgeIds.filter((id) =>
+              edges.has(id),
+            ),
+          }
+        : {}),
+      ...(g.views.features
+        ? {
+            features: g.views.features
+              .map((f) => ({
+                ...f,
+                flowIds: f.flowIds.filter((id) => flows.has(id)),
+                ...(f.mainEdgeIds
+                  ? {
+                      mainEdgeIds: f.mainEdgeIds.filter((id) =>
+                        edges
+                          .get(id)
+                          ?.data.flowIds.some((fid) => f.flowIds.includes(fid)),
+                      ),
+                    }
+                  : {}),
+              }))
+              .filter((f) => f.flowIds.length),
+          }
+        : {}),
+    },
+  };
+}
 export function removeElements(
   g: Graph,
   nodeIds: string[],
@@ -262,7 +360,7 @@ export function removeElements(
         ? { ...n, parentId: undefined, position: absolutePosition(n, g.nodes) }
         : n,
     );
-  return {
+  return reconcileViews({
     ...g,
     nodes,
     edges: g.edges.filter(
@@ -282,7 +380,7 @@ export function removeElements(
         : {}),
       requiredIds: f.requiredIds.filter((id) => !removed.has(id)),
     })),
-  };
+  });
 }
 export function absolutePosition(n: Vertex, nodes: Vertex[]) {
   const parent = nodes.find((p) => p.id === n.parentId);

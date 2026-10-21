@@ -15,6 +15,18 @@ export function graphForExchange(graph: Graph): Graph {
 }
 export const exampleGraph: Graph = {
   schemaVersion: 1,
+  views: {
+    overviewEdgeIds: ["api-db"],
+    overviewNodeIds: ["api", "db"],
+    features: [
+      {
+        id: "browse",
+        name: "사진 조회",
+        flowIds: ["read"],
+        mainEdgeIds: ["api-db"],
+      },
+    ],
+  },
   nodes: [
     {
       id: "api",
@@ -57,6 +69,7 @@ export const exampleGraph: Graph = {
         callsBasis: "unknown",
         traffic: "all",
         purpose: "delivery",
+        detailLevel: "main",
         note: "실제 DB 호출입니다. 호출 수 1은 논리 연결 기본값입니다.",
       },
     },

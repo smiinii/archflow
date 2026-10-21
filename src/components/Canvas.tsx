@@ -61,6 +61,7 @@ import {
   positionIsFixed,
   type Change,
 } from "../lib/readability";
+import { readingView, type ReadingMode } from "../lib/reading";
 import { routeGraph, type Route } from "../lib/routing";
 import { snapPosition, type Guide } from "../lib/alignment";
 import { TechIcon } from "./Icons";
@@ -68,6 +69,10 @@ import "@xyflow/react/dist/style.css";
 type Selection = { nodes: string[]; edges: string[] };
 export type LabelMode = "hidden" | "selected" | "all";
 type Props = {
+  readingMode?: ReadingMode;
+  readingTitle?: string;
+  readingFlows?: string[];
+  expandedId?: string | null;
   focused?: boolean;
   labelMode?: LabelMode;
   readOnly?: boolean;
@@ -100,6 +105,10 @@ type Props = {
 };
 const CanvasContext = createContext<{
   metrics: Record<string, Metric>;
+  groups?: Record<string, number>;
+  groupProblems?: Record<string, number>;
+  boundaries?: Record<string, string>;
+  readOnly?: boolean;
   active: Set<string> | null;
   source: string | null;
   checkpoint: () => void;
@@ -135,7 +144,7 @@ function ComponentNode({
       }
       className={
         "architecture-node " +
-        (m?.bad ? "problem " : "") +
+        (m?.bad || context.groupProblems?.[id] ? "problem " : "") +
         (selected ? "chosen " : "") +
         (context.source === id ? "source " : "") +
         (muted ? "faded " : "") +
@@ -155,7 +164,7 @@ function ComponentNode({
       }
     >
       <NodeResizer
-        isVisible={selected}
+        isVisible={selected && !context.readOnly}
         minWidth={CARD_MIN.width}
         minHeight={CARD_MIN.height}
         onResizeStart={context.checkpoint}
@@ -176,11 +185,24 @@ function ComponentNode({
         />
       ))}
       <div className="node-tech">
-        <TechIcon id={data.catalogId} size={look.iconSize} />
-        <span title={item.title}>{item.title}</span>
+        {context.groups?.[id] !== undefined ? (
+          <Group size={look.iconSize} />
+        ) : (
+          <TechIcon id={data.catalogId} size={look.iconSize} />
+        )}
+        <span title={item.title}>
+          {context.groups?.[id] !== undefined
+            ? `실행·데이터 경계 · ${context.groups[id]}개 요소`
+            : item.title}
+        </span>
       </div>
+      {context.boundaries?.[id] && (
+        <span className="node-boundary" title={context.boundaries[id]}>
+          {context.boundaries[id]}
+        </span>
+      )}
       <strong title={data.name}>{data.name}</strong>
-      {selected && (
+      {selected && !context.readOnly && (
         <button
           className="node-connect-button nodrag nopan"
           aria-label={data.name + "에서 연결하기"}
@@ -195,14 +217,21 @@ function ComponentNode({
       )}
       <div className="node-status">
         <span>
-          {m?.demand == null
-            ? item.structural
-              ? "구성 관계"
-              : "부하 미지정"
-            : fmt(m.demand) + " RPS"}
+          {context.groups?.[id] !== undefined
+            ? "클릭하여 내부 연결 보기"
+            : m?.demand == null
+              ? item.structural
+                ? "구성 관계"
+                : "부하 미지정"
+              : fmt(m.demand) + " RPS"}
         </span>
         <span>
-          {m?.bad ? (
+          {context.groupProblems?.[id] ? (
+            <>
+              <AlertCircle size={12} />
+              내부 문제 {context.groupProblems[id]}곳
+            </>
+          ) : m?.bad ? (
             <>
               <AlertCircle size={12} />
               {m.overload ? "용량 초과" : "시간 초과"}
@@ -233,7 +262,7 @@ function ComponentNode({
   );
 }
 function GroupNode({ id, data, selected }: NodeProps<Node<Vertex["data"]>>) {
-  const { checkpoint, changes } = useContext(CanvasContext);
+  const { checkpoint, changes, readOnly } = useContext(CanvasContext);
   return (
     <div
       className={
@@ -253,7 +282,7 @@ function GroupNode({ id, data, selected }: NodeProps<Node<Vertex["data"]>>) {
       <NodeResizer
         minWidth={200}
         minHeight={160}
-        isVisible={selected}
+        isVisible={selected && !readOnly}
         onResizeStart={checkpoint}
         handleClassName="resize-dot"
         lineClassName="resize-line"
@@ -446,7 +475,26 @@ function CanvasInner(p: Props) {
     observer.observe(element);
     return () => observer.disconnect();
   }, [api]);
-  const metrics = useMemo(() => allMetrics(g, p.flowId), [g, p.flowId]);
+  const metrics = useMemo(
+    () =>
+      allMetrics(
+        p.readingFlows?.length
+          ? {
+              ...g,
+              flows: g.flows.filter((f) => p.readingFlows!.includes(f.id)),
+            }
+          : g,
+        p.flowId,
+      ),
+    [g, p.flowId, p.readingFlows],
+  );
+  const reading = useMemo(
+    () =>
+      p.readingMode
+        ? readingView(g, p.readingMode, p.readingFlows || [], p.expandedId)
+        : null,
+    [g, p.readingMode, p.readingFlows, p.expandedId],
+  );
   const active = useMemo(
     () =>
       p.flowId
@@ -460,9 +508,9 @@ function CanvasInner(p: Props) {
     [g, p.flowId],
   );
   const visibleGraph = useMemo(() => {
-    const view = flowView(g, p.flowId, p.focused ?? true);
+    const view = reading?.graph || flowView(g, p.flowId, p.focused ?? true);
     return view;
-  }, [g, p.flowId, p.focused]);
+  }, [g, p.flowId, p.focused, reading]);
   const routes = useMemo(() => routeGraph(visibleGraph), [visibleGraph]);
   const nodes = sortNodes(visibleGraph.nodes).map((n) => ({
     ...n,
@@ -505,7 +553,8 @@ function CanvasInner(p: Props) {
         route: routes[e.id],
         labelMode: p.labelMode || "selected",
         motion: p.motion && (!p.flowId || e.data.flowIds.includes(p.flowId)),
-        faded: !!p.flowId && !e.data.flowIds.includes(p.flowId),
+        faded:
+          !p.readingMode && !!p.flowId && !e.data.flowIds.includes(p.flowId),
         bad: metrics[e.target]?.bad,
         changed: p.changes?.some(
           (c) => c.scope === "edge" && c.id === e.id && c.kinds.length,
@@ -518,11 +567,22 @@ function CanvasInner(p: Props) {
     })) as Edge[];
   const currentFit = {
     ...fitOptions,
+    ...(p.readingMode && p.readingMode !== "all"
+      ? {
+          minZoom: p.readingMode === "overview" ? 0.45 : 0.65,
+          padding: {
+            top: "56px",
+            right: "20px",
+            bottom: "56px",
+            left: "20px",
+          } as const,
+        }
+      : {}),
     nodes: visibleGraph.nodes
       .filter((n) => n.type !== "group")
       .map((n) => ({ id: n.id })),
   };
-  const signature = `${p.flowId}:${p.focused}:${p.fitKey}:${!!visibleGraph.nodes.length}`;
+  const signature = `${p.flowId}:${p.focused}:${p.fitKey}:${p.readingMode}:${p.readingFlows?.join(",")}:${p.expandedId}:${!!visibleGraph.nodes.length}`;
   async function fitReadable() {
     await api.fitView({ ...currentFit, duration: 0 });
     const components = visibleGraph.nodes.filter((n) => n.type !== "group");
@@ -538,9 +598,13 @@ function CanvasInner(p: Props) {
     const height =
       Math.max(...rectangles.map((r) => r.y + r.height)) -
       Math.min(...rectangles.map((r) => r.y));
+    const minimum = currentFit.minZoom;
     if (
-      width * 0.85 > wrap.current.clientWidth - 24 ||
-      height * 0.85 > wrap.current.clientHeight - 150
+      p.readingMode !== "overview" &&
+      (width * minimum > wrap.current.clientWidth - 40 ||
+        height * minimum >
+          wrap.current.clientHeight -
+            (p.readingMode === "function" ? 112 : 150))
     )
       navigate(
         g.flows.find((f) => f.id === p.flowId)?.entryId || components[0].id,
@@ -642,7 +706,17 @@ function CanvasInner(p: Props) {
     <CanvasContext.Provider
       value={{
         metrics,
-        active,
+        groups: reading?.groups,
+        groupProblems: Object.fromEntries(
+          Object.keys(reading?.groups || {}).map((id) => [
+            id,
+            g.nodes.filter((n) => n.parentId === id && metrics[n.id]?.bad)
+              .length,
+          ]),
+        ),
+        boundaries: reading?.boundaries,
+        readOnly: p.readOnly,
+        active: p.readingMode ? null : active,
         source: p.source,
         checkpoint: p.checkpoint,
         startConnect: p.readOnly ? () => {} : p.startConnect,
@@ -764,20 +838,31 @@ function CanvasInner(p: Props) {
           }
         >
           <span>
-            {p.flowId
-              ? g.flows.find((f) => f.id === p.flowId)?.name
-              : "전체 아키텍처"}
+            {p.readingTitle ||
+              (p.flowId
+                ? g.flows.find((f) => f.id === p.flowId)?.name
+                : p.readingMode === "overview"
+                  ? "전체 개요"
+                  : "전체 아키텍처")}
           </span>
           <small>
-            {p.flowId
-              ? p.focused !== false
-                ? "선택 흐름만 보기"
-                : "전체 안에서 강조"
-              : "서비스 · 데이터 · 배포 관계"}
+            {p.readingMode === "function"
+              ? "주요 흐름 · 구성요소를 선택해 상세 연결 보기"
+              : p.flowId
+                ? p.focused !== false
+                  ? "선택 흐름만 보기"
+                  : "전체 안에서 강조"
+                : p.readingMode === "overview"
+                  ? "경계를 묶은 요약 · 기능이나 요소를 선택하세요"
+                  : "서비스 · 데이터 · 배포 관계"}
           </small>
         </div>
         <div className="canvas-navigation nodrag nopan">
-          <span>읽기 크기 유지 · 손 도구로 이동</span>
+          <span>
+            {p.readingMode === "overview"
+              ? "전체 개요 · 기능을 선택해 자세히 보기"
+              : "읽기 크기 유지 · 손 도구로 이동"}
+          </span>
           <button
             className="outline"
             onClick={() => void api.fitView({ ...currentFit, minZoom: 0.15 })}
@@ -854,6 +939,11 @@ function CanvasInner(p: Props) {
                 ));
               })()}
             </div>
+          </div>
+        )}
+        {reading && reading.hiddenEdges > 0 && (
+          <div className="reading-note">
+            상세 연결 {reading.hiddenEdges}개 접힘 · 원본과 계산은 유지됩니다
           </div>
         )}
         {!g.nodes.length && (

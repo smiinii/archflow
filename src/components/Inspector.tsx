@@ -464,6 +464,28 @@ export function Inspector(p: Props) {
                   <option value="relation">배포·구성 관계</option>
                 </select>
               </label>
+              <label className="field vertical">
+                <span>읽기 화면에서 표시</span>
+                <select
+                  aria-label="연결 표시 단계"
+                  value={edge.data.detailLevel || "main"}
+                  onChange={(e) => {
+                    p.checkpoint();
+                    edgeData({
+                      detailLevel: e.target.value as "main" | "detail",
+                    });
+                  }}
+                >
+                  <option value="main">주요 연결 · 기능 흐름에 표시</option>
+                  <option value="detail">
+                    상세 연결 · 구성요소 선택 시 표시
+                  </option>
+                </select>
+              </label>
+              <p className="help">
+                표시 단계는 계산에 영향을 주지 않습니다. 실제 DB 호출도 상세
+                연결로 접을 수 있습니다.
+              </p>
               <p className="help">
                 동기는 응답을 기다리고, 비동기는 작업 완료를 기다리지 않습니다.
                 구성 관계는 요청 계산에서 제외합니다.

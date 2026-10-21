@@ -21,6 +21,12 @@ const fields: Record<string, string> = {
   iconSize: "로고 크기",
   positionLocked: "위치 고정",
   style: "카드 디자인",
+  views: "읽기 화면",
+  overviewEdgeIds: "개요 대표 연결",
+  overviewNodeIds: "개요 대표 구성요소",
+  features: "기능 묶음",
+  mainEdgeIds: "기능 주요 연결",
+  detailLevel: "연결 표시 단계",
 };
 export function inspectImport(text: string): {
   graph: Graph | null;
@@ -45,6 +51,12 @@ export function inspectImport(text: string): {
       // Only documented style fields are accepted; unknown fields need explicit review.
       while (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable)
         schema = schema.unwrap() as z.ZodType;
+      if (Array.isArray(value) && schema instanceof z.ZodArray) {
+        value.forEach((v, i) =>
+          scan(v, schema.element as z.ZodType, `${path}[${i}]`),
+        );
+        return;
+      }
       if (!value || typeof value !== "object" || Array.isArray(value)) return;
       if (schema instanceof z.ZodObject)
         for (const [key, v] of Object.entries(value)) {
@@ -60,6 +72,7 @@ export function inspectImport(text: string): {
         raw[collection].forEach((x: unknown, i: number) =>
           scan(x, graphSchema.shape[collection].element, `${collection}[${i}]`),
         );
+    if (raw?.views) scan(raw.views, graphSchema.shape.views, "views");
     if (parsed.success) return { graph: parsed.data, issues: [], unsupported };
     const issues = parsed.error.issues.map((issue) => {
       const path = issue.path as (string | number)[];
@@ -95,7 +108,7 @@ export function inspectImport(text: string): {
       else if (issue.code === "invalid_type")
         detail = `현재 ${value === null ? "null" : typeof value}, ${issue.expected} 값이 필요합니다.${key === "replicas" || key === "calls" || key === "hitPercent" ? " 이 필드는 null 대신 기본값과 미확인 근거를 사용하세요." : ""}`;
       else if (issue.code === "unrecognized_keys")
-        detail = `지원하지 않는 설정: ${issue.keys.join(", ")}. data.style에는 backgroundColor·fontSize·fontWeight·iconSize만 사용하세요.`;
+        detail = `지원하지 않는 설정: ${issue.keys.join(", ")}. ${path[0] === "views" ? "읽기 화면에는 overviewNodeIds·overviewEdgeIds·features, 기능에는 id·name·flowIds·mainEdgeIds를 사용하세요." : "data.style에는 backgroundColor·fontSize·fontWeight·iconSize만 사용하세요."}`;
       else if (issue.code === "invalid_value")
         detail = `허용값: ${issue.values.join(", ")}`;
       return { path, message: `${name} · ${field}: ${detail}` };

@@ -53,3 +53,26 @@ it("restores card colors, typography, icon size and position locks after storage
     r.data.projects[0].graph.nodes[1].data,
   );
 });
+
+it("preserves overview and multi-stage feature definitions through IndexedDB restoration", async () => {
+  const r = record("reading");
+  const g = r.data.projects[0].graph;
+  const f = g.flows[0];
+  g.views = {
+    overviewNodeIds: [g.nodes[0].id],
+    overviewEdgeIds: [g.edges[0].id],
+    features: [
+      {
+        id: "business",
+        name: "사용자 기능",
+        flowIds: [f.id],
+        mainEdgeIds: g.edges
+          .filter((e) => e.data.flowIds.includes(f.id))
+          .map((e) => e.id),
+      },
+    ],
+  };
+  g.edges[0].data.detailLevel = "detail";
+  await saveLocal("reading-test", r);
+  expect((await loadLocal("reading-test"))?.data.projects[0].graph).toEqual(g);
+});

@@ -2820,10 +2820,12 @@ details p {
 /* Compact cards: one technology row, two left-aligned role lines, one status row. */
 .architecture-node {
   min-height: 140px;
-  grid-template-rows: var(--card-icon-size, 32px) minmax(
+  grid-template-rows:
+    var(--card-icon-size, 32px) minmax(
       calc(var(--card-role-size, 17px) * 2.6),
       1fr
-    ) 22px;
+    )
+    22px;
   gap: 4px;
   padding: 10px 12px;
 }
@@ -2942,4 +2944,93 @@ details p {
   height: var(--card-icon-size, 32px);
   max-width: calc(var(--card-icon-size, 32px) * 2);
   object-fit: contain;
+}
+/* Progressive disclosure: overview → function → local connections. */
+.feature-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 16px;
+  border-bottom: 1px solid #e8e8ef;
+  overflow-x: auto;
+  flex-shrink: 0;
+  background: #fff;
+}
+.feature-strip > span {
+  font-size: 12px;
+  color: #777583;
+  white-space: nowrap;
+  margin-right: 4px;
+}
+.feature-strip button {
+  padding: 7px 12px;
+  border: 1px solid #e5e4ec;
+  background: #fff;
+  border-radius: 9px;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #55515f;
+}
+.feature-strip button[aria-pressed="true"] {
+  background: #f1edfc;
+  border-color: #d8cff0;
+  color: #74609d;
+}
+.api-step-list {
+  margin-top: 10px;
+  color: #807b8d;
+  font-size: 12px;
+}
+.api-step-list summary {
+  padding: 8px;
+  cursor: pointer;
+}
+.reading-note {
+  position: absolute;
+  bottom: 14px;
+  left: 64px;
+  max-width: calc(100% - 200px);
+  border: 1px solid #e6e3ed;
+  background: #fffffff2;
+  color: #7c7688;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 11px;
+  pointer-events: none;
+}
+.node-boundary {
+  position: absolute;
+  left: 2px;
+  top: -23px;
+  max-width: 200px;
+  font-size: 10px;
+  color: #857c91;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.view-options > .help {
+  font-size: 11px;
+  margin: 0;
+  margin-right: auto;
+}
+@media (max-width: 580px) {
+  .feature-strip {
+    padding: 8px;
+  }
+  .feature-strip > span {
+    display: none;
+  }
+  .view-toggle button {
+    padding: 7px;
+    font-size: 11px;
+  }
+  .reading-note {
+    max-width: calc(100% - 120px);
+    left: 48px;
+    font-size: 10px;
+  }
+  .view-options > .help {
+    max-width: 100%;
+  }
 }

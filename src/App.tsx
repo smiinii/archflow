@@ -36,11 +36,13 @@ import {
   Undo2,
 } from "lucide-react";
 import type { Connection } from "@xyflow/react";
+import { functionsFor, type ReadingMode } from "./lib/reading";
 import { buildInterviewPrompt } from "./lib/aiPrompt";
 import { catalog, categoryName, getItem } from "./lib/catalog";
 import { analyze, allMetrics, fmt, percent } from "./lib/analysis";
 import {
   absolutePosition,
+  reconcileViews,
   createFlow,
   defaultParams,
   emptyGraph,
@@ -99,6 +101,9 @@ export default function App() {
   const [dialog, setDialog] = useState<Dialog>(null),
     [flowId, setFlowId] = useState<string | null>(null),
     [focused, setFocused] = useState(true),
+    [readingMode, setReadingMode] = useState<ReadingMode>("overview"),
+    [featureId, setFeatureId] = useState<string | null>(null),
+    [expandedId, setExpandedId] = useState<string | null>(null),
     [labelMode, setLabelMode] = useState<LabelMode>("selected"),
     [layoutPreview, setLayoutPreview] = useState<Graph | null>(null),
     [layoutFitKey, setLayoutFitKey] = useState(0),
@@ -140,21 +145,68 @@ export default function App() {
   }, [storage.user?.id]);
   const selectedProject = w?.projects.find((p) => p.id === w.currentProjectId);
   const g = selectedProject?.graph;
+  const features = useMemo(() => (g ? functionsFor(g) : []), [g]);
+  const feature = features.find((f) => f.id === featureId);
+  const readingFlows = useMemo(
+    () => feature?.flowIds || (flowId ? [flowId] : []),
+    [feature, flowId],
+  );
+  function overview() {
+    setReadingMode("overview");
+    setFeatureId(null);
+    setFlowId(null);
+    setExpandedId(null);
+    setSelection({ nodes: [], edges: [] });
+    stopConnect();
+  }
+  function chooseFeature(id: string) {
+    const f = features.find((f) => f.id === id);
+    if (!f) return;
+    setFeatureId(id);
+    setFlowId(f.flowIds.length === 1 ? f.flowIds[0] : null);
+    setReadingMode("function");
+    setExpandedId(null);
+    setSelection({ nodes: [], edges: [] });
+    stopConnect();
+  }
+  function editAll() {
+    setReadingMode("all");
+    setExpandedId(null);
+    setFeatureId(null);
+    setFlowId(null);
+    setSelection({ nodes: [], edges: [] });
+  }
+  useEffect(() => {
+    if (featureId && !feature) overview();
+  }, [featureId, feature]);
   const activeFlow = g?.flows.find((f) => f.id === flowId);
   const validFlow = activeFlow ? flowId : null;
   useEffect(() => {
     setSelection({ nodes: [], edges: [] });
   }, [validFlow]);
   const metrics = useMemo(
-    () => (g ? allMetrics(g, validFlow) : {}),
-    [g, validFlow],
+    () =>
+      g
+        ? allMetrics(
+            readingMode === "function" && readingFlows.length
+              ? {
+                  ...g,
+                  flows: g.flows.filter((f) => readingFlows.includes(f.id)),
+                }
+              : g,
+            validFlow,
+          )
+        : {},
+    [g, validFlow, readingFlows, readingMode],
   );
   const updateGraph = useCallback(
     (fn: (g: Graph) => Graph) => {
       storage.change((w) => ({
         ...w,
         projects: w.projects.map((p) =>
-          p.id === w.currentProjectId ? { ...p, graph: fn(p.graph) } : p,
+          p.id === w.currentProjectId
+            ? { ...p, graph: reconcileViews(fn(p.graph)) }
+            : p,
         ),
       }));
     },
@@ -207,6 +259,9 @@ export default function App() {
   useEffect(() => {
     setSelection({ nodes: [], edges: [] });
     setLayoutPreview(null);
+    setReadingMode("overview");
+    setFeatureId(null);
+    setExpandedId(null);
     setFlowId(null);
     setSource(null);
     setConnecting(false);
@@ -321,6 +376,8 @@ export default function App() {
     id: string | null,
     kind: Link["data"]["kind"] = connectionKind,
   ) {
+    setReadingMode("all");
+    setExpandedId(null);
     setConnecting(true);
     requestAnimationFrame(() => scrollToSection(canvasSection.current));
     setSource(id);
@@ -347,10 +404,15 @@ export default function App() {
           targetHandle: null,
         });
       setSelection({ nodes: [source], edges: [] });
-    } else setInspectorOpen(true);
+    } else {
+      setInspectorOpen(true);
+      if (readingMode !== "all") setExpandedId(id);
+    }
   }
   function addComponent(catalogId: string, copyId?: string, style?: CardStyle) {
     if (!g) return;
+    setReadingMode("all");
+    setExpandedId(null);
     if (g.nodes.length >= 1000) {
       setMessage("프로젝트당 최대 1,000개 요소를 지원합니다.");
       return;
@@ -815,6 +877,7 @@ export default function App() {
                       edges: [],
                     });
                     setInspectorOpen(true);
+                    if (readingMode !== "all") setExpandedId(n.id);
                   }}
                   style={{ paddingLeft: n.parentId ? 24 : 10 }}
                 >
@@ -843,33 +906,56 @@ export default function App() {
               </button>
             </div>
             <button
-              className={"layer-row " + (!validFlow ? "active" : "")}
+              className={
+                "layer-row " +
+                (readingMode === "overview" && !expandedId ? "active" : "")
+              }
               onClick={() => {
-                setFlowId(null);
-                stopConnect();
+                overview();
                 if (window.innerWidth <= 580) setSidebarOpen(false);
               }}
             >
               <Workflow size={16} />
-              전체 아키텍처
+              전체 개요
             </button>
-            {g.flows.map((f) => (
+            {features.map((f) => (
               <button
-                key={f.id}
+                key={"feature-" + f.id}
                 className={
-                  "layer-row flow-row " + (f.id === validFlow ? "active" : "")
+                  "layer-row flow-row " + (featureId === f.id ? "active" : "")
                 }
-                title={f.name}
                 onClick={() => {
-                  setFlowId(f.id);
-                  stopConnect();
+                  chooseFeature(f.id);
                   if (window.innerWidth <= 580) setSidebarOpen(false);
                 }}
               >
-                <span className="method-mini">{f.method}</span>
+                <Workflow size={14} />
                 <span>{f.name}</span>
               </button>
             ))}
+            <details className="api-step-list">
+              <summary>개별 API 단계</summary>
+              {g.flows.map((f) => (
+                <button
+                  key={f.id}
+                  className={
+                    "layer-row flow-row " + (f.id === validFlow ? "active" : "")
+                  }
+                  title={f.name}
+                  onClick={() => {
+                    setFlowId(f.id);
+                    setFeatureId(null);
+                    setReadingMode("function");
+                    setExpandedId(null);
+                    stopConnect();
+                    if (window.innerWidth <= 580) setSidebarOpen(false);
+                  }}
+                >
+                  <span className="method-mini">{f.method}</span>
+                  <span>{f.name}</span>
+                </button>
+              ))}
+            </details>
           </section>
         </aside>
         <div className="work-scroll" aria-label="아키텍처와 상세 정보">
@@ -889,19 +975,22 @@ export default function App() {
 
               <div className="view-toggle">
                 <button
-                  aria-pressed={!validFlow}
-                  onClick={() => setFlowId(null)}
+                  aria-pressed={readingMode === "overview" && !expandedId}
+                  onClick={overview}
                 >
-                  전체 구조
+                  전체 개요
                 </button>
                 <button
-                  aria-pressed={!!validFlow}
+                  aria-pressed={readingMode === "function"}
                   onClick={() => {
-                    if (g.flows[0]) setFlowId(g.flows[0].id);
+                    if (features[0]) chooseFeature(features[0].id);
                     else setDialog("new-flow");
                   }}
                 >
-                  API 흐름
+                  기능 흐름
+                </button>
+                <button aria-pressed={readingMode === "all"} onClick={editAll}>
+                  모든 연결 · 편집
                 </button>
               </div>
               <button
@@ -958,8 +1047,8 @@ export default function App() {
                 </label>
               ) : (
                 <span className="traffic-summary">
-                  {g.nodes.filter((n) => n.type === "component").length}개 요소
-                  · {g.edges.length}개 연결
+                  원본 {g.nodes.filter((n) => n.type === "component").length}개
+                  요소 · {g.edges.length}개 연결
                 </span>
               )}
               <label className="motion-switch">
@@ -981,8 +1070,58 @@ export default function App() {
                 <span>흐름 모션</span>
               </label>
             </div>
+            <div className="feature-strip" aria-label="기능 선택">
+              <span>
+                {expandedId
+                  ? "구성요소 상세"
+                  : readingMode === "overview"
+                    ? "어떤 기능이 궁금하신가요?"
+                    : "기능"}
+              </span>
+              {features.map((f) => (
+                <button
+                  key={f.id}
+                  aria-pressed={
+                    featureId === f.id || (!featureId && validFlow === f.id)
+                  }
+                  onClick={() => chooseFeature(f.id)}
+                >
+                  {f.name}
+                </button>
+              ))}
+              {!features.length && (
+                <button onClick={() => setDialog("new-flow")}>
+                  기능 흐름 추가
+                </button>
+              )}
+            </div>
             <div className="view-options">
-              {validFlow && (
+              {expandedId && (
+                <>
+                  <strong>
+                    {g.nodes.find((n) => n.id === expandedId)?.data.name} · 상세
+                    연결
+                  </strong>
+                  <button
+                    className="outline"
+                    onClick={() => {
+                      setExpandedId(null);
+                      setSelection({ nodes: [], edges: [] });
+                    }}
+                  >
+                    상세 접기
+                  </button>
+                </>
+              )}
+              {readingMode !== "all" && (
+                <span className="help">
+                  {readingMode === "overview"
+                    ? "같은 경계는 묶어서 표시합니다."
+                    : "주요 흐름을 표시합니다."}{" "}
+                  구성요소를 누르면 실제 연결을 펼칩니다.
+                </span>
+              )}
+              {validFlow && readingMode === "all" && (
                 <>
                   <div className="view-toggle">
                     <button
@@ -1039,6 +1178,15 @@ export default function App() {
             <Canvas
               key={selectedProject.id}
               graph={g}
+              readingMode={readingMode}
+              readingTitle={
+                expandedId
+                  ? `${g.nodes.find((n) => n.id === expandedId)?.data.name} · 상세 연결`
+                  : feature?.name
+              }
+              readingFlows={readingFlows}
+              expandedId={expandedId}
+              readOnly={readingMode !== "all"}
               focused={focused}
               labelMode={labelMode}
               flowId={validFlow}
@@ -1054,6 +1202,14 @@ export default function App() {
               edgeClick={(id) => {
                 setSelection({ nodes: [], edges: [id] });
                 setInspectorOpen(true);
+                if (readingMode === "overview" && !expandedId) {
+                  const e = g.edges.find((e) => e.id === id);
+                  if (e)
+                    setExpandedId(
+                      g.nodes.find((n) => n.id === e.source)?.parentId ||
+                        e.source,
+                    );
+                }
                 stopConnect();
               }}
               startConnect={(id) => startConnect(id)}
@@ -1087,7 +1243,9 @@ export default function App() {
                     ? `문제 후보 ${problems}곳`
                     : validFlow
                       ? "설정한 수치를 확인하세요"
-                      : "모든 API의 요구 부하를 합산합니다"}
+                      : readingMode === "function"
+                        ? "선택 기능의 API 요구 부하를 합산합니다"
+                        : "모든 API의 요구 부하를 합산합니다"}
                 </span>
               </div>
               {flowResult ? (
@@ -1132,7 +1290,10 @@ export default function App() {
               update={updateGraph}
               startConnect={startConnect}
               stopConnect={stopConnect}
-              selectNode={(id) => setSelection({ nodes: [id], edges: [] })}
+              selectNode={(id) => {
+                setSelection({ nodes: [id], edges: [] });
+                if (readingMode !== "all") setExpandedId(id);
+              }}
               selectEdge={(id) => {
                 setSelection({ nodes: [], edges: [id] });
                 stopConnect();
@@ -1154,7 +1315,9 @@ export default function App() {
           <MousePointer2 size={12} />
           {source
             ? `${g.nodes.find((n) => n.id === source)?.data.name} → 대상을 계속 선택하세요 · ${connectionKind === "async" ? "비동기" : connectionKind === "sync" ? "동기" : "구성 관계"}`
-            : "드래그로 다중 선택 · Shift로 추가 선택 · Space로 화면 이동 · Alt로 맞춤 해제"}
+            : readingMode !== "all"
+              ? "기능 선택 → 구성요소 클릭으로 상세 · Space로 화면 이동 · 모든 연결에서 편집"
+              : "드래그로 다중 선택 · Shift로 추가 선택 · Space로 화면 이동 · Alt로 맞춤 해제"}
         </span>
         <span>가정값 · 실측을 대체하지 않습니다</span>
       </footer>
@@ -1310,6 +1473,9 @@ export default function App() {
               checkpoint();
               updateGraph((g) => ({ ...g, flows: [...g.flows, f] }));
               setFlowId(f.id);
+              setFeatureId(null);
+              setReadingMode("function");
+              setExpandedId(null);
               setDialog(null);
               setInspectorOpen(true);
             }

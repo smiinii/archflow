@@ -104,7 +104,7 @@ function search(
   used: Point[][],
   lane: number,
 ): Point[] | null {
-  const margin = 10 + lane * 9;
+  const margin = 10 + (used.length % 8) * 7 + lane * 9;
   const xs = [
     ...new Set([
       a.x,
@@ -170,8 +170,8 @@ function search(
         cost.get(key)! +
         length(p, q) +
         (dir && dir !== nextDir ? 30 : 0) +
-        crossingCount(p, q, used) * 140 +
-        (shared ? length(p, q) * 2 + 60 : 0);
+        crossingCount(p, q, used) * 280 +
+        (shared ? length(p, q) * 12 + 200 : 0);
       if (value >= (cost.get(nextKey) ?? Infinity)) continue;
       cost.set(nextKey, value);
       prev.set(nextKey, key);
@@ -270,8 +270,17 @@ export function routeGraph(g: Graph): Record<string, Route> {
         t = e.targetHandle?.split("-")[0] || pair[1];
       if (tried.has(s + t)) continue;
       tried.add(s + t);
-      const start = port(a, s, 6),
-        end = port(b, t, -6),
+      const slot = (id: string, side: string, r: Rect) => {
+        const incident = g.edges.filter(
+          (link) => link.source === id || link.target === id,
+        );
+        const index = incident.findIndex((link) => link.id === e.id);
+        const span =
+          (side === "left" || side === "right" ? r.height : r.width) - 40;
+        return ((index + 1) / (incident.length + 1) - 0.5) * span;
+      };
+      const start = port(a, s, slot(e.source, s, a)),
+        end = port(b, t, slot(e.target, t, b)),
         out = extend(start, s, 26 + lane * 18),
         into = extend(end, t, 26 + lane * 18);
       if (
@@ -291,14 +300,37 @@ export function routeGraph(g: Graph): Record<string, Route> {
       const crossings = candidate
         .slice(1)
         .reduce((sum, p, i) => sum + crossingCount(candidate[i], p, used), 0);
-      const score = distance + (middle.length - 2) * 30 + crossings * 140;
+      let shared = 0;
+      for (let i = 1; i < candidate.length; i++)
+        for (const line of used)
+          for (let j = 1; j < line.length; j++) {
+            const u = candidate[i - 1],
+              v = candidate[i],
+              a = line[j - 1],
+              b = line[j];
+            if (u.x === v.x && a.x === b.x && u.x === a.x)
+              shared += Math.max(
+                0,
+                Math.min(Math.max(u.y, v.y), Math.max(a.y, b.y)) -
+                  Math.max(Math.min(u.y, v.y), Math.min(a.y, b.y)),
+              );
+            if (u.y === v.y && a.y === b.y && u.y === a.y)
+              shared += Math.max(
+                0,
+                Math.min(Math.max(u.x, v.x), Math.max(a.x, b.x)) -
+                  Math.max(Math.min(u.x, v.x), Math.min(a.x, b.x)),
+              );
+          }
+      const score =
+        distance + (middle.length - 2) * 30 + crossings * 280 + shared * 12;
       if (score < best) {
         best = score;
         points = candidate;
         sourceSide = s;
         targetSide = t;
       }
-      if (!crossings && distance <= length(start, end) * 1.4 + 80) break;
+      if (!crossings && !shared && distance <= length(start, end) * 1.4 + 80)
+        break;
     }
     const blocked = !points.length;
     if (points.length) used.push(points);
